@@ -5,34 +5,44 @@
 <body>
 <main id="pad" aria-label="触摸板：轻点播放，滑动调节，长按倍速"></main>
 <main id="remote" hidden>
-  <header><div><p class="eyebrow">BILI REMOTE</p><p id="deviceStatus"><span id="onlineDot"></span><span id="deviceName">正在连接电脑</span></p></div><div class="header-actions"><button id="hapticToggle" class="icon-button haptic-toggle" type="button" aria-label="震动反馈" aria-pressed="true" title="震动反馈：开启"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="4" width="8" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m4 7-2 3 2 4-2 3m18-10 2 3-2 4 2 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button><button id="openSettings" class="icon-button" aria-label="连接与设置">⚙</button></div></header>
-  <section class="remote-heading"><p class="eyebrow">让播放，随手掌控</p><h1>我的遥控器</h1><p id="remoteMessage">同一 WiFi，打开即连接</p></section>
+  <header class="remote-header"><div class="brand"><svg viewBox="0 0 28 28" aria-hidden="true"><rect x="4" y="7" width="20" height="16" rx="5"/><path d="m9 3 3 4m7-4-3 4M10 13v4m8-4v4"/></svg><span>BILI <b>REMOTE</b></span></div><div class="header-actions"><button id="hapticToggle" class="icon-button haptic-toggle" type="button" aria-label="震动反馈" aria-pressed="true" title="震动反馈：开启"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="4" width="8" height="16" rx="2"/><path d="m4 7-2 3 2 4-2 3m18-10 2 3-2 4 2 3"/></svg></button><button id="openSettings" class="icon-button" aria-label="连接与设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4 1-2h4l1 2 3 2 2 .2 2 3-1 2v3l1 2-2 3-2 .2-3 2-1 2h-4l-1-2-3-2-2-.2-2-3 1-2v-3L2 9l2-3L6 6Z" transform="translate(1 1) scale(.9)"/><circle cx="12" cy="12" r="3"/></svg></button></div></header>
+  <button id="deviceStatus" class="device-card" type="button" aria-label="选择电脑与连接设置"><svg class="device-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 21h8m-4-5v5"/></svg><span class="device-copy"><span class="device-caption"><span id="onlineDot"></span><span id="devicePhase">正在连接</span></span><span id="deviceName">正在连接电脑</span></span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 7 5 5-5 5"/></svg></button>
+  <section class="remote-heading"><h1>播放控制</h1><p id="remoteMessage" aria-live="polite">同一 WiFi，打开即连接</p></section>
   <section class="playback-disc" aria-label="播放控制">
+    <svg class="disc-lines" viewBox="0 0 320 320" aria-hidden="true"><path d="m65 65 42 42m106 106 42 42M255 65l-42 42M107 213l-42 42"/></svg>
     <button class="disc-control volume-up" data-command="volume" data-delta="0.05" aria-label="音量增大"><span class="volume-symbol" aria-hidden="true">+</span><span>音量加</span></button>
     <button class="seek left" data-command="seek" data-delta="-10" aria-label="快退 10 秒"><svg viewBox="0 0 32 32"><path d="M14 8 4 16l10 8V8Zm13 0-10 8 10 8V8Z"/></svg><span>10 秒</span></button>
     <button id="playButton" class="play-button" data-command="toggle" aria-label="播放或暂停"><svg id="playSymbol" viewBox="0 0 40 40"><path d="M12 7 32 20 12 33Z"/></svg></button>
     <button class="seek right" data-command="seek" data-delta="10" aria-label="快进 10 秒"><svg viewBox="0 0 32 32"><path d="m5 8 10 8-10 8V8Zm13 0 10 8-10 8V8Z"/></svg><span>10 秒</span></button>
     <button class="disc-control volume-down" data-command="volume" data-delta="-0.05" aria-label="音量减小"><span class="volume-symbol" aria-hidden="true">−</span><span>音量减</span></button>
   </section>
-  <div class="playback-status"><span>播放 / 暂停</span><span aria-hidden="true">·</span><span id="volumeText" aria-live="polite">音量</span></div>
-  <button id="holdSpeed" class="hold-speed" aria-label="按住倍速，左滑 2 倍，右滑 3 倍"><span class="speed-direction left" aria-hidden="true">‹</span><span id="holdRate">2×</span><span class="speed-copy">按住倍速 <small>左滑 2× · 右滑 3× · 松手恢复</small></span><span class="speed-direction right" aria-hidden="true">›</span></button>
-  <button id="launchBrowser" class="launch-browser">打开电脑上的哔哩哔哩 <span>↗</span></button>
-  <footer><button class="style-tab selected" data-style="remote">遥控器</button><button class="style-tab" data-style="touchpad">触摸板</button></footer>
+  <div class="playback-status"><span>中键播放 / 暂停</span><span class="status-divider"></span><span id="volumeText" aria-live="polite">音量未读取</span></div>
+  <button id="holdSpeed" class="hold-speed" aria-label="按住倍速，左滑 2 倍，右滑 3 倍"><span class="speed-topline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 7 5-7 5Zm9 0 7 5-7 5Z"/></svg><span class="speed-copy">按住倍速</span><span id="holdRate">2×</span></span><span class="speed-track" aria-hidden="true"><span class="speed-detent detent-two">2×</span><span class="speed-direction">← 按住左右滑动 →</span><span class="speed-detent detent-three">3×</span></span><span class="speed-caption">松手恢复原速</span></button>
+  <button id="launchBrowser" class="launch-browser"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18m-13-3h.1m3 0h.1m-1 7 5 3-5 3Z"/></svg><span>在电脑打开哔哩哔哩</span><svg class="launch-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></button>
+  <footer aria-label="遥控样式"><button class="style-tab selected" data-style="remote" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v3m0 6v3m-6-6h3m6 0h3"/></svg>按键遥控</button><button class="style-tab" data-style="touchpad" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="4"/><path d="m9 10 3-3 3 3m-6 4 3 3 3-3"/></svg>触摸板</button></footer>
 </main>
 <div id="hud" role="status"></div>
-<dialog id="settings"><form id="settingsForm">
-  <div class="dialog-heading"><div><p class="eyebrow">连接与设置</p><h2>找到你的电脑</h2></div><button type="button" id="closeSettings" class="icon-button" aria-label="关闭设置">×</button></div>
-  <p class="description">电脑打开配套软件，手机连接同一 WiFi。首次输入配对码，以后自动连接。</p>
-  <label>在线电脑<select id="computer"><option value="">正在扫描电脑信号…</option></select></label><button type="button" id="search" class="secondary">重新扫描</button>
-  <details id="manualDetails"><summary>手动输入 IP / 连接记录</summary><label>电脑地址<input id="host" placeholder="192.168.1.10 或 10.0.2.2:8765" autocapitalize="off" spellcheck="false"></label><button type="button" id="connectManual" class="secondary">连接并保存地址</button><div id="history"></div></details>
-  <div class="setting-divider"></div>
-  <label>遥控器样式<select id="style"><option value="touchpad">触摸板 · 纯黑手势区域</option><option value="remote">传统遥控器 · 按键控制</option></select></label>
-  <label>播放目标<select id="target"><option value="auto">自动选择</option><option value="browser">网页播放窗口</option><option value="native">Windows 客户端</option></select></label>
-  <div id="nativeSettings" hidden><label>媒体会话<select id="session"><option value="">自动识别哔哩哔哩</option></select></label><button type="button" id="discover" class="secondary">检测客户端</button></div>
-  <label>长按起始挡位<select id="rate"><option value="2">2 倍</option><option value="3">3 倍</option></select></label>
-  <label class="setting-switch" for="haptics"><span>震动反馈<small>长按触发、切换挡位时轻震一下</small></span><input id="haptics" type="checkbox" role="switch" checked></label>
-  <p id="connectionStatus" class="description">正在连接电脑…</p><button type="submit" class="primary">开始遥控</button>
-  <p class="description">触摸板：轻点播放 / 暂停，上下滑音量，左右滑进度，长按倍速。双指触摸或返回键可打开设置。</p>
+<dialog id="settings" aria-labelledby="settingsTitle"><form id="settingsForm">
+  <div class="sheet-handle" aria-hidden="true"></div>
+  <div class="dialog-heading"><div><p class="eyebrow">BILI REMOTE</p><h2 id="settingsTitle">遥控器设置</h2></div><button type="button" id="closeSettings" class="icon-button" aria-label="关闭设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M7 17 17 7"/></svg></button></div>
+  <div class="settings-scroll">
+    <section class="settings-section" aria-labelledby="connectionTitle"><div class="section-title"><h3 id="connectionTitle">连接电脑</h3><button type="button" id="search" class="text-button">重新扫描</button></div>
+      <div class="settings-card"><p id="connectionStatus" class="connection-status" role="status">正在连接电脑…</p><label class="computer-field">在线电脑<select id="computer"><option value="">正在扫描电脑信号…</option></select></label>
+      <details id="manualDetails"><summary>手动输入 IP / 连接记录<span aria-hidden="true">＋</span></summary><div class="manual-content"><label for="host">电脑地址</label><input id="host" placeholder="192.168.1.10 或 10.0.2.2:8765" autocapitalize="off" spellcheck="false"><button type="button" id="connectManual" class="secondary">连接并保存地址</button><div id="history"></div></div></details></div>
+      <p class="section-note">两端连接同一 WiFi，首次配对后自动重连。</p>
+    </section>
+    <section class="settings-section" aria-labelledby="controlsTitle"><div class="section-title"><h3 id="controlsTitle">操作偏好</h3></div><div class="settings-card">
+      <label class="setting-row"><span>遥控器样式</span><select id="style"><option value="touchpad">纯黑触摸板</option><option value="remote">按键遥控器</option></select></label>
+      <label class="setting-row"><span>长按起始挡位</span><select id="rate"><option value="2">2 倍</option><option value="3">3 倍</option></select></label>
+      <label class="setting-switch" for="haptics"><span>震动反馈<small>长按触发、切换挡位时轻震</small></span><input id="haptics" type="checkbox" role="switch" checked></label>
+    </div><p class="section-note">按住后左滑 2 倍、右滑 3 倍，松手恢复原速。</p></section>
+    <section class="settings-section" aria-labelledby="playerTitle"><div class="section-title"><h3 id="playerTitle">播放器</h3></div><div class="settings-card">
+      <label class="setting-row"><span>播放目标</span><select id="target"><option value="auto">自动选择</option><option value="browser">网页播放窗口</option><option value="native">Windows 客户端</option></select></label>
+      <div id="nativeSettings" hidden><label class="computer-field">媒体会话<select id="session"><option value="">自动识别哔哩哔哩</option></select></label><button type="button" id="discover" class="secondary">检测客户端</button></div>
+    </div><p class="section-note">客户端可控功能取决于其开放的媒体接口。</p></section>
+    <details class="gesture-guide"><summary>触摸板手势<span aria-hidden="true">＋</span></summary><dl><div><dt>轻点</dt><dd>播放 / 暂停</dd></div><div><dt>上下滑</dt><dd>调节音量</dd></div><div><dt>左右滑</dt><dd>快进 / 快退</dd></div><div><dt>原地长按</dt><dd>临时倍速</dd></div></dl><p class="section-note">双指触摸或 Android 返回键打开设置。</p></details>
+  </div>
+  <div class="sheet-actions"><span>偏好设置自动保存</span><button type="submit" class="primary">完成</button></div>
 </form></dialog>
 <dialog id="pairing"><form id="pairingForm"><p class="eyebrow">只需配对一次</p><h2>连接这台电脑</h2><p id="pairingComputer" class="description"></p><label for="pairingCode">输入电脑显示的 6 位配对码</label><input id="pairingCode" class="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><p id="pairingMessage" class="description">配对成功后，下次打开自动连接。</p><button type="submit" class="primary">配对并连接</button><button type="button" id="cancelPairing" class="text-button">选择其他电脑</button></form></dialog>
 <script src="remote.js"></script><script src="gestures.js"></script><script src="connection.js"></script><script src="app.js"></script>

@@ -242,6 +242,18 @@ def build_mobile_setup():
     image.save(OUTPUT / "mobile-connection.png", optimize=True)
 
 
+def build_redesign():
+    image, draw = canvas(1120, 1180, "按键遥控器与设置", "0.4.4 页面渲染 · 连接数据为示例")
+    for x, title, path in [(165, "一体圆环 · 按住滑动换挡", "mobile-remote.png"),
+                           (665, "分组设置 · 内容可滚动", "mobile-settings.png")]:
+        text(draw, (x - 30, 184), title, 24, bold=True)
+        phone(image, RAW / path, x, 242, 300)
+    text(draw, (80, 1000), "上下调节音量，左右跳转进度，中央播放 / 暂停", 25, CYAN)
+    text(draw, (80, 1055), "保留 2 / 3 倍滑动切挡、震动开关与自动重连", 23, MUTED)
+    text(draw, (80, 1112), "设计参考与实现取舍见 docs/DESIGN_REFERENCES.md", 19, MUTED)
+    image.save(OUTPUT / "remote-redesign.png", optimize=True)
+
+
 def build_connection():
     image, draw = canvas(1600, 560, "从安装到遥控，只需四步", "电脑可接网线，手机可连 WiFi；关键是接入同一路由器且设备之间允许通信")
     steps = [("01", "安装两端", "电脑装 EXE", "手机装 APK"), ("02", "同一路由器", "打开电脑软件", "手机自动发现"),
@@ -332,7 +344,7 @@ def build_hero():
     text(draw, (86, 550), "传统遥控器  /  纯黑触摸板", 28)
     draw.rounded_rectangle((82, 640, 664, 705), 16, fill="#263146")
     text(draw, (106, 655), "同一局域网 · 首次配对 · 后续自动重连", 25, CYAN)
-    text(draw, (85, 773), "v0.4.3  ·  Windows + Android", 24, MUTED)
+    text(draw, (85, 773), "v0.4.4  ·  Windows + Android", 24, MUTED)
     phone(image, RAW / "mobile-touchpad.png", 900, 145, 245)
     phone(image, RAW / "mobile-remote.png", 1220, 85, 265)
     text(draw, (925, 714), "纯黑手势区域", 24, MUTED)
@@ -348,7 +360,7 @@ def main():
     RAW.mkdir(parents=True, exist_ok=True)
     capture_mobile()
     capture_desktop()
-    for renderer in (build_styles, build_mobile_setup, build_connection, build_gestures, build_desktop_panels, build_upgrade, build_hero):
+    for renderer in (build_styles, build_mobile_setup, build_redesign, build_connection, build_gestures, build_desktop_panels, build_upgrade, build_hero):
         renderer()
     print("Documentation images:", OUTPUT)
 

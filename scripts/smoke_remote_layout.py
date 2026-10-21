@@ -60,6 +60,31 @@ with sync_playwright() as p:
             page.wait_for_function('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").length===5')
             commands=page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").map(({cmd,delta})=>({cmd,...(delta===undefined?{}:{delta})}))')
             assert commands==[{'cmd':'volume','delta':0.05},{'cmd':'volume','delta':-0.05},{'cmd':'seek','delta':-10},{'cmd':'seek','delta':10},{'cmd':'toggle'}],commands
+            # The sheet header/actions remain reachable while its content scrolls.
+            page.locator('#deviceStatus').click()
+            page.locator('#settings[open]').wait_for()
+            sheet=page.evaluate('''() => {
+              const s=document.querySelector('#settings'),b=document.querySelector('.sheet-actions .primary').getBoundingClientRect(),c=document.querySelector('#closeSettings').getBoundingClientRect();
+              return {overflow:s.scrollWidth>s.clientWidth,done:b.top>=0&&b.bottom<=innerHeight,close:c.top>=0&&c.bottom<=innerHeight};
+            }''')
+            assert sheet=={'overflow':False,'done':True,'close':True},(width,height,sheet)
+            page.locator('#manualDetails summary').click()
+            page.locator('#host').fill('192.168.1.10')
+            page.locator('#target').select_option('native')
+            assert page.locator('#nativeSettings').is_visible()
+            page.locator('#discover').scroll_into_view_if_needed()
+            page.locator('#target').select_option('auto')
+            assert page.locator('#nativeSettings').is_hidden()
+            page.locator('#rate').select_option('3')
+            assert page.locator('#holdSpeed').evaluate("e=>e.classList.contains('gear-three')")
+            page.locator('#style').select_option('touchpad')
+            assert page.locator('[data-style="touchpad"]').get_attribute('aria-pressed')=='true'
+            page.locator('#style').select_option('remote')
+            assert page.locator('[data-style="remote"]').get_attribute('aria-pressed')=='true'
+            page.locator('#rate').select_option('2')
+            page.locator('.sheet-actions .primary').click()
+            assert not page.locator('#settings').evaluate('e=>e.open')
+            page.locator('#remote').evaluate('e=>e.scrollTop=0')
             if width == 390:
                 page.evaluate('window.sentCommands=[];window.hapticPulses=0')
                 button=page.locator('#holdSpeed')

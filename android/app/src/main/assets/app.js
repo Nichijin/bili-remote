@@ -40,7 +40,7 @@ function haptic() {
 }
 function holdChanged(rate) {
   byId("holdSpeed").classList.toggle("holding", rate !== null);
-  byId("holdSpeed").classList.toggle("gear-three", rate === 3);
+  byId("holdSpeed").classList.toggle("gear-three", (rate ?? config.rate) === 3);
   byId("holdRate").textContent = `${rate ?? config.rate}×`;
 }
 const gestures = new GestureEngine({ send, hint, error, rate: () => config.rate, haptic, changed: holdChanged });
@@ -49,6 +49,7 @@ function cancelControls() { gestures.cancel(); hold.stop(false); speedPointer = 
 function connectionState(state) {
   byId("connectionStatus").textContent = state.text;
   byId("deviceName").textContent = state.phase === "connected" ? state.name : state.text;
+  byId("devicePhase").textContent = ({connected: "已连接 · 选择电脑", pair: "等待配对", connecting: "连接中", disconnected: "等待电脑上线", error: "连接异常"})[state.phase] || "正在寻找电脑";
   document.body.classList.toggle("connected", state.phase === "connected");
   if (state.phase === "connected") {
     byId("host").value = state.host;
@@ -71,6 +72,11 @@ function connectionState(state) {
 }
 function renderHistory() {
   byId("history").replaceChildren();
+  if (!config.history?.length) {
+    const empty = document.createElement("p"); empty.className = "history-empty";
+    empty.textContent = "还没有连接记录，手动连接后自动保存。";
+    byId("history").append(empty);
+  }
   for (const entry of config.history || []) {
     const row = document.createElement("div"); row.className = "history-entry";
     const connect = document.createElement("button"); connect.type = "button"; connect.className = "history-connect";
@@ -104,6 +110,11 @@ function setStyle(style) {
   byId("remote").hidden = config.ui_style !== "remote";
   byId("pad").hidden = config.ui_style !== "touchpad";
   byId("style").value = config.ui_style;
+  document.querySelectorAll("[data-style]").forEach(button => {
+    const selected = button.dataset.style === config.ui_style;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
   persist();
 }
 window.openSettings = () => { cancelControls(); if (pairing.open) pairing.close(); renderHistory(); if (!settings.open) settings.showModal(); };
@@ -120,8 +131,8 @@ byId("target").value = config.target;
 byId("target").onchange = () => { cancelControls(); config.target = byId("target").value; byId("nativeSettings").hidden = config.target !== "native"; persist(); };
 byId("nativeSettings").hidden = config.target !== "native";
 byId("rate").value = config.rate;
-byId("rate").onchange = () => { cancelControls(); config.rate = Number(byId("rate").value); byId("holdRate").textContent = `${config.rate}×`; persist(); };
-byId("holdRate").textContent = `${config.rate}×`;
+byId("rate").onchange = () => { cancelControls(); config.rate = Number(byId("rate").value); holdChanged(null); persist(); };
+holdChanged(null);
 function renderHaptics() {
   byId("haptics").checked = config.haptics;
   byId("hapticToggle").setAttribute("aria-pressed", String(config.haptics));
@@ -145,6 +156,7 @@ byId("connectManual").onclick = () => {
 };
 byId("search").onclick = () => { connection.needsPin = false; scan(); connection.reconnect(); byId("connectionStatus").textContent = connection.connected ? "电脑已连接" : "正在扫描电脑信号…"; };
 byId("openSettings").onclick = window.openSettings;
+byId("deviceStatus").onclick = window.openSettings;
 byId("closeSettings").onclick = () => settings.close();
 byId("settingsForm").onsubmit = event => { event.preventDefault(); persist(); settings.close(); if (!connection.connected && !connection.connecting) byId("connectManual").click(); };
 byId("pairingForm").onsubmit = event => { event.preventDefault(); if (pairingTarget) { byId("pairingMessage").textContent = "正在验证配对码…"; connection.connect(pairingTarget.host, pairingTarget.computer_id, { pin: byId("pairingCode").value.trim() }); } };
