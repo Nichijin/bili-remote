@@ -53,12 +53,17 @@ async def test_direct_browser_playback_without_extensions(tmp_path):
         assert result["paused"] is True
         result = await browser.execute({"cmd": "seek", "delta": 12}, "phone")
         assert 12 <= result["time"] <= 13
+        state = await browser.execute({"cmd": "status"}, "phone")
+        result = await browser.execute({"cmd": "seek_to", "position": 13.375, "media_key": state["media_key"]}, "phone")
+        assert result["time"] == pytest.approx(13.375)
         result = await browser.execute({"cmd": "volume", "delta": -.2}, "phone")
         assert result["volume"] == .8
         result = await browser.execute({"cmd": "speed_start", "rate": 3}, "phone")
         assert result["rate"] == 3
         result = await browser.execute({"cmd": "speed_change", "rate": 2}, "phone")
         assert result["rate"] == 2
+        result = await browser.execute({"cmd": "speed_change", "rate": .5}, "phone")
+        assert result["rate"] == .5
         result = await browser.execute({"cmd": "speed_change", "rate": 3}, "phone")
         assert result["rate"] == 3
         await browser.execute({"cmd": "speed_end"}, "other-phone")

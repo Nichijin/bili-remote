@@ -23,7 +23,7 @@ window.Android={loadSettings:()=>localStorage.getItem('smoke-settings')||JSON.st
 window.WebSocket=class{
  static OPEN=1;
  constructor(){this.readyState=0;setTimeout(()=>{this.readyState=1;this.onopen?.()},10)}
- send(text){const m=JSON.parse(text);window.sentCommands.push(m);const reply=m.role==='remote'?{type:'auth',ok:true,token:'fixture',computer_id:sample.computer_id,computer_name:'DESKTOP-LONG-COMPUTER-NAME-FOR-LAYOUT'}:{id:m.id,ok:true,result:{volume:0.55,paused:true}};setTimeout(()=>this.onmessage?.({data:JSON.stringify(reply)}),5)}
+ send(text){const m=JSON.parse(text);window.sentCommands.push(m);const reply=m.role==='remote'?{type:'auth',ok:true,token:'fixture',computer_id:sample.computer_id,computer_name:'DESKTOP-LONG-COMPUTER-NAME-FOR-LAYOUT'}:{id:m.id,ok:true,result:{volume:0.55,paused:true,time:120,seek_start:0,seek_end:3600,media_key:'layout-video'}};setTimeout(()=>this.onmessage?.({data:JSON.stringify(reply)}),5)}
  close(){this.readyState=3}
 };
 '''.replace('__CONFIG__',json.dumps(config))
@@ -82,7 +82,7 @@ with sync_playwright() as p:
             page.locator('#target').select_option('auto')
             assert page.locator('#nativeSettings').is_hidden()
             page.locator('#rate').select_option('3')
-            assert page.locator('#holdSpeed').evaluate("e=>e.classList.contains('gear-three')")
+            assert page.locator('#speedTrack .active').get_attribute('data-rate')=='3'
             page.locator('#style').select_option('touchpad')
             assert page.locator('[data-style="touchpad"]').get_attribute('aria-pressed')=='true'
             page.locator('#style').select_option('remote')
@@ -129,6 +129,31 @@ with sync_playwright() as p:
                 page.wait_for_function('window.sentCommands.some(m=>m.cmd==="speed_end")')
                 assert page.evaluate('window.hapticPulses')==3
                 assert page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping" && m.cmd!=="speed_keep").map(m=>m.cmd)')==['speed_start','speed_change','speed_change','speed_end']
+                # Preferences persist and apply equally to both modes.
+                page.evaluate('window.openSettings()')
+                page.locator('#gearSettings summary').click()
+                page.locator('#gearCount').select_option('5')
+                assert page.locator('#gearEditor select').count()==5
+                assert page.locator('#speedTrack .speed-detent').count()==5
+                page.locator('#rate').select_option('0.5')
+                page.locator('#showHints').uncheck()
+                page.locator('#closeSettings').click()
+                page.evaluate('window.sentCommands=[];window.hapticPulses=0')
+                page.mouse.move(80,300);page.mouse.down();page.wait_for_timeout(560)
+                page.mouse.move(140,300);page.mouse.up()
+                page.wait_for_function('window.sentCommands.some(m=>m.cmd==="speed_end")')
+                assert page.evaluate('window.sentCommands.filter(m=>m.rate).map(m=>m.rate)')==[0.5,0.75]
+                assert not page.locator('#hud').is_visible()
+                page.reload();page.locator('body.connected').wait_for()
+                assert page.locator('#showHints').is_checked()==False
+                assert page.locator('#gearEditor select').count()==5
+                # Actual pointer input sends fractional positions before release.
+                page.evaluate('window.sentCommands=[]')
+                page.mouse.move(60,300);page.mouse.down();page.mouse.move(110,300)
+                page.wait_for_function('window.sentCommands.some(m=>m.cmd==="seek_to")')
+                page.mouse.move(177,300);page.wait_for_timeout(100);page.mouse.up()
+                page.wait_for_function('window.sentCommands.filter(m=>m.cmd==="seek_to").at(-1).position===156')
+                assert not page.locator('#hud').is_visible()
                 print('Both modes: actual pointer input, detent haptics, persisted off switch and restored settings passed')
             report.append({'viewport':f'{width}x{height}','circle_diameter':round(disc['w'],1),'controls_inside_ring':True,'minimum_touch_target':44,'commands_correct':True})
             context.close()

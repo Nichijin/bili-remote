@@ -10,6 +10,7 @@ def main():
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
         "--name", "BiliRemote-Desktop", "--distpath", str(ROOT / "dist"),
         "--icon", str(ROOT / "desktop/assets/bili-remote.ico"),
+        "--manifest", str(ROOT / "desktop/assets/app.manifest"),
         "--workpath", str(ROOT / ".tooling/pyinstaller"), "--specpath", str(ROOT / ".tooling"),
         "--add-data", str(ROOT / "android/app/src/main/assets") + ";android/app/src/main/assets", "--add-data", str(ROOT / "README.md") + ";.",
         "--add-data", str(ROOT / "docs") + ";docs",

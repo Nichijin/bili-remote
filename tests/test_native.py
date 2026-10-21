@@ -19,6 +19,9 @@ class Session:
     def get_timeline_properties(self):
         return SimpleNamespace(position=self.position, min_seek_time=timedelta(), max_seek_time=timedelta(seconds=100))
 
+    async def try_get_media_properties_async(self):
+        return SimpleNamespace(title=getattr(self, "title", "test video"), artist="test artist")
+
     async def try_change_playback_rate_async(self, rate):
         self.rate = rate
         return True
@@ -73,6 +76,44 @@ async def test_seek_uses_ticks_and_clamps_to_end():
     native, session = controller()
     await native.execute(cmd("seek", delta=80), "phone")
     assert session.seek_ticks == 1_000_000_000
+
+
+@pytest.mark.asyncio
+async def test_absolute_drag_uses_reported_timeline_and_preserves_fractional_seconds():
+    native, session = controller()
+    status = await native.execute(cmd("status"), "phone")
+    assert status["time"] == 50 and status["seek_end"] == 100
+    await native.execute(cmd("seek_to", position=63.375, media_key=status["media_key"]), "phone")
+    assert session.seek_ticks == 633_750_000
+    session.title = "another video with the same duration"
+    with pytest.raises(RuntimeError, match="已变化"):
+        await native.execute(cmd("seek_to", position=30, media_key=status["media_key"]), "phone")
+    with pytest.raises(RuntimeError, match="已变化"):
+        await native.execute(cmd("seek_to", position=20, media_key="another"), "phone")
+    assert session.seek_ticks == 633_750_000
+
+
+@pytest.mark.asyncio
+async def test_slow_motion_restores_original_speed():
+    native, session = controller()
+    await native.execute(cmd("speed_start", rate=.5), "phone")
+    assert session.rate == .5
+    await native.execute(cmd("speed_end"), "phone")
+    assert session.rate == 1.5
+
+
+@pytest.mark.asyncio
+async def test_missing_media_identity_reports_failure_without_changing_position():
+    native, session = controller()
+    async def unavailable():
+        raise RuntimeError("media provider unavailable")
+    session.try_get_media_properties_async = unavailable
+    with pytest.raises(RuntimeError, match="视频信息"):
+        await native.execute(cmd("status"), "phone")
+    assert session.seek_ticks is None
+    # Ordinary relative seeking does not require the extra identity interface.
+    await native.execute(cmd("seek", delta=10), "phone")
+    assert session.seek_ticks == 600_000_000
 
 
 @pytest.mark.asyncio

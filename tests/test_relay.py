@@ -44,6 +44,7 @@ def make_relay(tmp_path, feedback=None):
     {"cmd": "toggle"}, {"cmd": "seek", "delta": -10}, {"cmd": "seek", "delta": 10},
     {"cmd": "volume", "delta": -.05}, {"cmd": "volume", "delta": .05},
     {"cmd": "speed_start", "rate": 2}, {"cmd": "status"},
+    {"cmd": "seek_to", "position": 20, "media_key": "closed-video"},
 ])
 async def test_remote_commands_never_launch_a_closed_browser(tmp_path, monkeypatch, target, message):
     profile = tmp_path / "profile"

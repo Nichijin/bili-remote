@@ -36,6 +36,28 @@ test('seek honors seekable range', async () => {
   await player.execute({ cmd: 'seek', delta: -120 }); assert.equal(video.currentTime, 20);
 });
 
+test('absolute scrubbing preserves fractions, respects ranges and rejects a changed video source', async () => {
+  const {player, video} = setup();
+  const state = await player.execute({cmd:'status'});
+  await player.execute({cmd:'seek_to', position:63.375, media_key:state.media_key});
+  assert.equal(video.currentTime, 63.375);
+  video.seekable = {length:1, start:() => 20, end:() => 80};
+  await player.execute({cmd:'seek_to', position:200, media_key:state.media_key});
+  assert.equal(video.currentTime, 80);
+  video.src = 'another-video';
+  await assert.rejects(player.execute({cmd:'seek_to', position:40, media_key:state.media_key}), /已变化/);
+  assert.equal(video.currentTime, 80);
+});
+
+test('slow motion holds restore the speed present before the hold', async () => {
+  const {player, video} = setup();
+  await player.execute({cmd:'speed_start', rate:.5, owner:'a'});
+  assert.equal(video.playbackRate,.5);
+  await player.execute({cmd:'speed_change', rate:.75, owner:'a'});
+  await player.execute({cmd:'speed_end', owner:'a'});
+  assert.equal(video.playbackRate,1.5);
+});
+
 test('changing gears retains the original rate and never changes owner', async () => {
   const { player, video } = setup();
   await player.execute({ cmd: 'speed_start', rate: 2, owner: 'a' });

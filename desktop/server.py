@@ -31,6 +31,9 @@ def operation_text(command, result):
         return "已暂停" if result.get("paused") is True else "继续播放" if result.get("paused") is False else "播放 / 暂停"
     if kind == "seek":
         return f"{'快进' if command['delta'] >= 0 else '快退'} {abs(command['delta']):g} 秒"
+    if kind == "seek_to":
+        tenths = round(result.get("time", command["position"]) * 10)
+        return f"进度 {tenths // 600:02d}:{tenths % 600 / 10:04.1f}"
     if kind == "volume":
         return f"音量 {round(result['volume'] * 100)}%" if "volume" in result else "音量增大" if command["delta"] > 0 else "音量减小"
     if kind in {"speed_start", "speed_change"}:

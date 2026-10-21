@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs/images"
 RAW = ROOT / ".tooling/docs-captures"
 sys.path.insert(0, str(ROOT))
-from scripts.release_files import release_paths
+from scripts.release_files import release_paths, release_version
+VERSION = release_version(ROOT)
 
 INK, MUTED, PINK, CYAN = "#F3F5FC", "#A3AEC3", "#FB7299", "#75E1EB"
 NAVY, CARD, LINE = "#101521", "#1B2233", "#323D54"
@@ -125,6 +126,8 @@ def capture_mobile():
                         if style == "remote":
                             page.locator("#openSettings").click()
                             page.screenshot(path=str(RAW / "mobile-settings.png"))
+                            page.locator(".settings-scroll").evaluate("e => { e.scrollTop += document.querySelector('#controlsTitle').closest('section').getBoundingClientRect().top - e.getBoundingClientRect().top; }")
+                            page.screenshot(path=str(RAW / "mobile-preferences.png"))
                             page.locator("#manualDetails summary").click()
                             page.screenshot(path=str(RAW / "mobile-history.png"))
                             page.locator("#manualDetails summary").click()
@@ -247,13 +250,13 @@ def build_mobile_setup():
 
 
 def build_redesign():
-    image, draw = canvas(1120, 1180, "按键遥控器与设置", "0.4.5 页面渲染 · 连接数据为示例")
+    image, draw = canvas(1120, 1180, "按键遥控器与设置", f"{VERSION} 页面渲染 · 连接数据为示例")
     for x, title, path in [(165, "一体圆环 · 按住滑动换挡", "mobile-remote.png"),
-                           (665, "播放器 · 手动打开视频", "mobile-player-settings.png")]:
+                           (665, "提示开关 · 自定义挡位", "mobile-preferences.png")]:
         text(draw, (x - 30, 184), title, 24, bold=True)
         phone(image, RAW / path, x, 242, 300)
     text(draw, (80, 1000), "上下调节音量，左右跳转进度，中央播放 / 暂停", 25, CYAN)
-    text(draw, (80, 1055), "按键不会自动打开视频；主动打开入口在设置中", 23, MUTED)
+    text(draw, (80, 1055), "默认 0.5 / 2 / 3 倍 · 最多 5 挡 · 操作提示可关闭", 23, MUTED)
     text(draw, (80, 1112), "设计参考与实现取舍见 docs/DESIGN_REFERENCES.md", 19, MUTED)
     image.save(OUTPUT / "remote-redesign.png", optimize=True)
 
@@ -278,7 +281,7 @@ def build_gestures():
     image, draw = canvas(1440, 1010, "黑色触摸板：四种手势", "以下为操作示意，图中的箭头和触点不会常驻显示在 App 中")
     cards = [("01", "轻点任意位置", "播放 / 暂停", "短按后松手", "tap"),
              ("02", "上下滑动", "调节视频音量", "上滑增大，下滑减小", "vertical"),
-             ("03", "左右滑动", "快进 / 快退", "右滑快进，左滑快退；松手跳转", "horizontal"),
+             ("03", "左右滑动", "连续拖动进度", "一屏对应 120 秒，松手提交最终位置", "horizontal"),
              ("04", "长按不放", "临时倍速播放", "按住 0.5 秒触发，松手恢复原速度", "hold")]
     for index, (number, title, main, caption, kind) in enumerate(cards):
         x, y = 52 + (index % 2) * 686, 185 + (index // 2) * 350
@@ -305,7 +308,7 @@ def build_gestures():
             text(draw, (x + 220, y + 222), second, 23, MUTED)
         else:
             text(draw, (x + 220, y + 180), caption, 23, MUTED)
-    text(draw, (78, 920), "长按后左右滑：左滑 2× / 右滑 3×，松手恢复原速", 25, CYAN)
+    text(draw, (78, 920), "默认 0.5 / 2 / 3 倍，左右滑动换挡，松手恢复原速", 25, CYAN)
     text(draw, (78, 966), "开始长按、切换挡位各轻震一次；可在设置中关闭震动", 23, MUTED)
     image.save(OUTPUT / "gestures.png", optimize=True)
 
@@ -348,7 +351,7 @@ def build_hero():
     text(draw, (86, 550), "传统遥控器  /  纯黑触摸板", 28)
     draw.rounded_rectangle((82, 640, 664, 705), 16, fill="#263146")
     text(draw, (106, 655), "同一局域网 · 首次配对 · 后续自动重连", 25, CYAN)
-    text(draw, (85, 773), "v0.4.5  ·  Windows + Android", 24, MUTED)
+    text(draw, (85, 773), f"v{VERSION}  ·  Windows + Android", 24, MUTED)
     phone(image, RAW / "mobile-touchpad.png", 900, 145, 245)
     phone(image, RAW / "mobile-remote.png", 1220, 85, 265)
     text(draw, (925, 714), "纯黑手势区域", 24, MUTED)

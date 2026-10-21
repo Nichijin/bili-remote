@@ -1,5 +1,6 @@
 """Windows GSMTC adapter. Unsupported capabilities are explicitly reported."""
 import asyncio
+import hashlib
 import time
 from datetime import timedelta
 from .detection import is_client
@@ -63,6 +64,18 @@ class NativeController:
             boost = self.boost
             await self._checked(boost["session"].try_change_playback_rate_async(boost["rate"]), "恢复速度")
             self.boost = None
+
+    @staticmethod
+    async def _timeline_key(session, start, end):
+        try:
+            properties = await asyncio.wait_for(session.try_get_media_properties_async(), timeout=3)
+            identity = [str(getattr(properties, name, "") or "") for name in ("title", "artist", "album_title", "track_number")]
+            if not any(identity[:3]):
+                raise ValueError("empty media identity")
+        except Exception as exc:
+            raise RuntimeError("客户端未提供可确认的视频信息，请重试或使用网页播放窗口拖动进度") from exc
+        value = "\0".join([session.source_app_user_model_id, str(start), str(end), *identity])
+        return "native:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     async def expire(self):
         async with self.lock:
@@ -139,11 +152,17 @@ class NativeController:
                     await self._checked(session.try_play_async(), "播放")
                 else:
                     raise RuntimeError("该客户端未开放播放/暂停接口")
-            elif command == "seek":
+            elif command in {"seek", "seek_to", "status"}:
+                timeline = session.get_timeline_properties()
+                start, end = timeline.min_seek_time.total_seconds(), timeline.max_seek_time.total_seconds()
+                key = await self._timeline_key(session, start, end) if command in {"seek_to", "status"} else ""
+                if command == "status":
+                    return {"time": timeline.position.total_seconds(), "duration": end, "seek_start": start, "seek_end": end if controls.is_playback_position_enabled else None, "media_key": key}
                 if not controls.is_playback_position_enabled:
                     raise RuntimeError("该客户端未开放进度控制接口")
-                timeline = session.get_timeline_properties()
-                position = timeline.position + timedelta(seconds=message["delta"])
+                if command == "seek_to" and message["media_key"] != key:
+                    raise RuntimeError("播放会话已变化，请重新拖动")
+                position = timedelta(seconds=message["position"]) if command == "seek_to" else timeline.position + timedelta(seconds=message["delta"])
                 position = max(timeline.min_seek_time, min(timeline.max_seek_time, position))
                 # GSMTC expects 100-nanosecond ticks, not seconds or a TimeSpan.
                 await self._checked(session.try_change_playback_position_async(int(position.total_seconds() * 10_000_000)), "进度调整")

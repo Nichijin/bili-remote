@@ -8,8 +8,10 @@ config.device_name ||= window.Android ? Android.deviceName() : "手机浏览器"
 config.ui_style ||= "touchpad";
 if (!config.schema) { if (config.target === "browser") config.target = "auto"; config.schema = 2; }
 config.target ||= "auto";
-config.rate = Number(config.rate) === 3 ? 3 : 2;
+config.gears = normalizeGears(config.gears);
+config.rate = config.gears.includes(Number(config.rate)) ? Number(config.rate) : config.gears.includes(2) ? 2 : config.gears[0];
 config.haptics = config.haptics !== false;
+config.show_hints = config.show_hints !== false;
 delete config.token;
 let hudTimer, scanFallback, pairingTarget = null, computerListSignature = "";
 let speedPointer = null;
@@ -18,13 +20,25 @@ function persist() {
   if (window.Android) Android.saveSettings(text); else localStorage.setItem("bili-remote", text);
 }
 function hint(text) {
+  byId("remoteMessage").textContent = text;
+  if (!config.show_hints) return;
   byId("hud").textContent = text;
   byId("hud").classList.add("visible");
   clearTimeout(hudTimer);
   hudTimer = setTimeout(() => byId("hud").classList.remove("visible"), 1600);
-  byId("remoteMessage").textContent = text;
 }
-function error(error) { hint(error.message || String(error)); }
+function error(error) {
+  const text = error.message || String(error);
+  byId("controlStatus").textContent = `最近操作失败：${text}`;
+  hint(text);
+}
+function previewSeek({ position, start, end }) {
+  if (!config.show_hints) return;
+  const time = seconds => { const tenths = Math.round(seconds * 10); return `${Math.floor(tenths / 600)}:${(tenths % 600 / 10).toFixed(1).padStart(4, "0")}`; };
+  hint(`${time(position)} / ${time(end)}`);
+  const bar = document.createElement("progress"); bar.max = end - start; bar.value = position - start;
+  bar.setAttribute("aria-label", "预计播放进度"); byId("hud").append(bar);
+}
 const connection = new RemoteConnection({ config, persist, state: connectionState, discovery: renderComputers });
 const send = (cmd, fields = {}) => connection.send(cmd, fields).then(result => {
   if (typeof result.volume === "number") byId("volumeText").textContent = `音量 ${Math.round(result.volume * 100)}%`;
@@ -40,11 +54,12 @@ function haptic() {
 }
 function holdChanged(rate) {
   byId("holdSpeed").classList.toggle("holding", rate !== null);
-  byId("holdSpeed").classList.toggle("gear-three", (rate ?? config.rate) === 3);
+  byId("holdSpeed").dataset.rate = rate ?? config.rate;
+  document.querySelectorAll("#speedTrack [data-rate]").forEach(gear => gear.classList.toggle("active", Number(gear.dataset.rate) === (rate ?? config.rate)));
   byId("holdRate").textContent = `${rate ?? config.rate}×`;
 }
-const gestures = new GestureEngine({ send, hint, error, rate: () => config.rate, haptic, changed: holdChanged });
-const hold = new HoldControl({ send, hint, error, rate: () => config.rate, haptic, changed: holdChanged });
+const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged });
+const hold = new HoldControl({ send, hint, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged });
 function cancelControls() { gestures.cancel(); hold.stop(false); speedPointer = null; }
 function connectionState(state) {
   byId("connectionStatus").textContent = state.text;
@@ -130,9 +145,46 @@ document.querySelectorAll("[data-style]").forEach(button => button.onclick = () 
 byId("target").value = config.target;
 byId("target").onchange = () => { cancelControls(); config.target = byId("target").value; byId("nativeSettings").hidden = config.target !== "native"; persist(); };
 byId("nativeSettings").hidden = config.target !== "native";
-byId("rate").value = config.rate;
 byId("rate").onchange = () => { cancelControls(); config.rate = Number(byId("rate").value); holdChanged(null); persist(); };
-holdChanged(null);
+function renderGears() {
+  byId("gearCount").value = config.gears.length;
+  byId("rate").replaceChildren(...config.gears.map(value => new Option(`${value} 倍`, value)));
+  byId("rate").value = config.rate;
+  byId("speedTrack").replaceChildren(); byId("gearEditor").replaceChildren();
+  config.gears.forEach((value, index) => {
+    const detent = document.createElement("span"); detent.className = "speed-detent";
+    detent.dataset.rate = value; detent.textContent = `${value}×`; byId("speedTrack").append(detent);
+    const row = document.createElement("label"); row.className = "setting-row";
+    const title = document.createElement("span"); title.textContent = `第 ${index + 1} 挡`;
+    const select = document.createElement("select"); select.setAttribute("aria-label", `第 ${index + 1} 挡倍速`);
+    for (const speed of SPEED_VALUES) {
+      const option = new Option(`${speed} 倍`, speed);
+      option.disabled = speed !== value && config.gears.includes(speed); select.add(option);
+    }
+    select.value = value;
+    select.onchange = () => { const gears = [...config.gears]; gears[index] = Number(select.value); saveGears(gears); };
+    row.append(title, select); byId("gearEditor").append(row);
+  });
+  holdChanged(null);
+}
+function saveGears(values) {
+  cancelControls(); config.gears = normalizeGears(values);
+  if (!config.gears.includes(config.rate)) config.rate = config.gears.includes(2) ? 2 : config.gears[0];
+  persist(); renderGears();
+}
+byId("gearCount").onchange = () => {
+  const count = Number(byId("gearCount").value), gears = config.gears.slice(0, count);
+  for (const value of SPEED_VALUES) { if (gears.length >= count) break; if (!gears.includes(value)) gears.push(value); }
+  saveGears(gears);
+};
+renderGears();
+function renderHints() {
+  byId("showHints").checked = config.show_hints;
+  document.body.classList.toggle("hints-off", !config.show_hints);
+  if (!config.show_hints) { clearTimeout(hudTimer); byId("hud").classList.remove("visible"); }
+}
+byId("showHints").onchange = () => { config.show_hints = byId("showHints").checked; renderHints(); persist(); };
+renderHints();
 function renderHaptics() {
   byId("haptics").checked = config.haptics;
   byId("hapticToggle").setAttribute("aria-pressed", String(config.haptics));

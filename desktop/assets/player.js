@@ -2,6 +2,18 @@
   function createPlayerController(findVideo, options = {}) {
     const now = options.now || Date.now;
     let boost = null;
+    const mediaKeys = new WeakMap();
+    const prefix = Math.random().toString(36).slice(2);
+    let nextKey = 0;
+    function mediaKey(video) {
+      const source = video.currentSrc || video.src || "";
+      let record = mediaKeys.get(video);
+      if (!record || record.source !== source || record.duration !== video.duration) {
+        record = { source, duration: video.duration, key: `${prefix}:${++nextKey}` };
+        mediaKeys.set(video, record);
+      }
+      return record.key;
+    }
     function restore() {
       if (!boost) return;
       boost.video.playbackRate = boost.originalRate;
@@ -30,11 +42,13 @@
         case "toggle":
           if (player.paused) await player.play(); else player.pause();
           break;
-        case "seek": {
+        case "seek":
+        case "seek_to": {
           const start = player.seekable.length ? player.seekable.start(0) : 0;
           const end = player.seekable.length ? player.seekable.end(player.seekable.length - 1) : player.duration;
           if (!Number.isFinite(end)) throw new Error("当前视频不支持跳转进度");
-          player.currentTime = Math.max(start, Math.min(end, player.currentTime + message.delta));
+          if (message.cmd === "seek_to" && message.media_key !== mediaKey(player)) throw new Error("播放视频已变化，请重新拖动");
+          player.currentTime = Math.max(start, Math.min(end, message.cmd === "seek_to" ? message.position : player.currentTime + message.delta));
           break;
         }
         case "volume":
@@ -52,7 +66,9 @@
         case "status": break;
         default: throw new Error("未知视频操作");
       }
-      return { paused: player.paused, time: player.currentTime, duration: Number.isFinite(player.duration) ? player.duration : null, volume: player.volume, rate: player.playbackRate };
+      const start = player.seekable.length ? player.seekable.start(0) : 0;
+      const end = player.seekable.length ? player.seekable.end(player.seekable.length - 1) : player.duration;
+      return { paused: player.paused, time: player.currentTime, duration: Number.isFinite(player.duration) ? player.duration : null, seek_start: start, seek_end: Number.isFinite(end) ? end : null, media_key: mediaKey(player), volume: player.volume, rate: player.playbackRate };
     }
     return { execute, restore, expire() { if (boost && now() > boost.deadline) restore(); } };
   }

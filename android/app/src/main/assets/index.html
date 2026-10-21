@@ -17,7 +17,7 @@
     <button class="disc-control volume-down" data-command="volume" data-delta="-0.05" aria-label="音量减小"><span class="volume-symbol" aria-hidden="true">−</span><span>音量减</span></button>
   </section>
   <div class="playback-status"><span>中键播放 / 暂停</span><span class="status-divider"></span><span id="volumeText" aria-live="polite">音量未读取</span></div>
-  <button id="holdSpeed" class="hold-speed" aria-label="按住倍速，左滑 2 倍，右滑 3 倍"><span class="speed-topline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 7 5-7 5Zm9 0 7 5-7 5Z"/></svg><span class="speed-copy">按住倍速</span><span id="holdRate">2×</span></span><span class="speed-track" aria-hidden="true"><span class="speed-detent detent-two">2×</span><span class="speed-direction">← 按住左右滑动 →</span><span class="speed-detent detent-three">3×</span></span><span class="speed-caption">松手恢复原速</span></button>
+  <button id="holdSpeed" class="hold-speed" aria-label="按住临时倍速，左右滑动切挡，松手恢复原速"><span class="speed-topline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 7 5-7 5Zm9 0 7 5-7 5Z"/></svg><span class="speed-copy">按住倍速</span><span id="holdRate">2×</span></span><span id="speedTrack" class="speed-track" aria-hidden="true"></span><span class="speed-caption">左滑降挡 · 右滑升挡 · 松手恢复原速</span></button>
   <footer aria-label="遥控样式"><button class="style-tab selected" data-style="remote" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v3m0 6v3m-6-6h3m6 0h3"/></svg>按键遥控</button><button class="style-tab" data-style="touchpad" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="4"/><path d="m9 10 3-3 3 3m-6 4 3 3 3-3"/></svg>触摸板</button></footer>
 </main>
 <div id="hud" role="status"></div>
@@ -32,14 +32,16 @@
     </section>
     <section class="settings-section" aria-labelledby="controlsTitle"><div class="section-title"><h3 id="controlsTitle">操作偏好</h3></div><div class="settings-card">
       <label class="setting-row"><span>遥控器样式</span><select id="style"><option value="touchpad">纯黑触摸板</option><option value="remote">按键遥控器</option></select></label>
-      <label class="setting-row"><span>长按起始挡位</span><select id="rate"><option value="2">2 倍</option><option value="3">3 倍</option></select></label>
+      <label class="setting-row"><span>长按起始挡位</span><select id="rate"></select></label>
+      <details id="gearSettings"><summary>自定义倍速挡位<span aria-hidden="true">＋</span></summary><label class="setting-row"><span>挡位数量</span><select id="gearCount"><option value="1">1 挡</option><option value="2">2 挡</option><option value="3">3 挡</option><option value="4">4 挡</option><option value="5">5 挡</option></select></label><div id="gearEditor"></div><p class="section-note">最多 5 挡，按倍速从低到高排列；每个值只能选一次。</p></details>
       <label class="setting-switch" for="haptics"><span>震动反馈<small>长按触发、切换挡位时轻震</small></span><input id="haptics" type="checkbox" role="switch" checked></label>
-    </div><p class="section-note">按住后左滑 2 倍、右滑 3 倍，松手恢复原速。</p></section>
+      <label class="setting-switch" for="showHints"><span>操作提示<small>遥控器与触摸板的浮层、手势说明</small></span><input id="showHints" type="checkbox" role="switch" checked></label>
+    </div><p class="section-note">默认 0.5 / 2 / 3 倍，从 2 倍开始。左右滑动换挡，松手恢复原速。</p></section>
     <section class="settings-section" aria-labelledby="playerTitle"><div class="section-title"><h3 id="playerTitle">播放器</h3></div><div class="settings-card">
       <label class="setting-row"><span>播放目标</span><select id="target"><option value="auto">自动选择</option><option value="browser">网页播放窗口</option><option value="native">Windows 客户端</option></select></label>
       <div id="nativeSettings" hidden><label class="computer-field">媒体会话<select id="session"><option value="">自动识别哔哩哔哩</option></select></label><button type="button" id="discover" class="secondary">检测客户端</button></div>
       <button id="launchBrowser" type="button" class="launch-browser"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18m-13-3h.1m3 0h.1m-1 7 5 3-5 3Z"/></svg><span>在电脑打开哔哩哔哩</span><svg class="launch-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></button>
-    </div><p id="browserMessage" class="section-note" role="status">打开专用网页播放窗口。遥控按键不会自动启动播放器。</p><p class="section-note">客户端请在电脑手动打开，可控功能取决于其开放的媒体接口。</p></section>
+    </div><p id="browserMessage" class="section-note" role="status">打开专用网页播放窗口。遥控按键不会自动启动播放器。</p><p id="controlStatus" class="section-note" role="status"></p><p class="section-note">客户端请在电脑手动打开，可控功能取决于其开放的媒体接口。</p></section>
     <details class="gesture-guide"><summary>触摸板手势<span aria-hidden="true">＋</span></summary><dl><div><dt>轻点</dt><dd>播放 / 暂停</dd></div><div><dt>上下滑</dt><dd>调节音量</dd></div><div><dt>左右滑</dt><dd>快进 / 快退</dd></div><div><dt>原地长按</dt><dd>临时倍速</dd></div></dl><p class="section-note">双指触摸或 Android 返回键打开设置。</p></details>
   </div>
   <div class="sheet-actions"><span>偏好设置自动保存</span><button type="submit" class="primary">完成</button></div>
