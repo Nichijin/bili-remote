@@ -33,7 +33,7 @@ def operation_text(command, result):
         return f"{'快进' if command['delta'] >= 0 else '快退'} {abs(command['delta']):g} 秒"
     if kind == "volume":
         return f"音量 {round(result['volume'] * 100)}%" if "volume" in result else "音量增大" if command["delta"] > 0 else "音量减小"
-    if kind == "speed_start":
+    if kind in {"speed_start", "speed_change"}:
         return f"临时 {command['rate']:g} 倍速"
     if kind == "speed_end":
         return "恢复原播放速度"
@@ -134,13 +134,15 @@ class Relay:
                 return await self.native.discover()
             if kind == "open_browser":
                 return await self.browser.open()
-            if kind in {"speed_keep", "speed_end"}:
+            if kind in {"speed_keep", "speed_end", "speed_change"}:
                 controller = self.held_targets.get(owner)
                 if controller:
                     result = await controller.execute(message, owner)
                     if kind == "speed_end":
                         self.held_targets.pop(owner, None)
                     return result
+                if kind == "speed_change":
+                    raise RuntimeError("临时倍速已结束，请重新长按")
                 return {}
             controller = await self.choose_target(message)
             if kind == "speed_start":

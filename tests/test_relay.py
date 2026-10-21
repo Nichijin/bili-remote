@@ -104,6 +104,17 @@ async def test_hold_release_stays_on_original_target_if_target_changes(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_gear_changes_stay_on_held_target_and_require_active_hold(tmp_path):
+    relay = make_relay(tmp_path)
+    with pytest.raises(RuntimeError, match="重新长按"):
+        await relay.execute({"cmd": "speed_change", "target": "browser", "rate": 3}, "phone")
+    await relay.execute({"cmd": "speed_start", "target": "browser", "rate": 2}, "phone")
+    await relay.execute({"cmd": "speed_change", "target": "native", "rate": 3}, "phone")
+    assert relay.browser.calls[-1][0]["cmd"] == "speed_change"
+    await relay.execute({"cmd": "speed_end", "target": "native"}, "phone")
+
+
+@pytest.mark.asyncio
 async def test_unrelated_website_cannot_authenticate_even_with_pin(tmp_path):
     relay = make_relay(tmp_path)
     async with serve(relay.handle, "127.0.0.1", 0) as server:

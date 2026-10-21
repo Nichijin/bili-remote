@@ -81,3 +81,17 @@ async def test_unavailable_speed_has_clear_error():
     session.controls.is_playback_rate_enabled = False
     with pytest.raises(RuntimeError, match="未开放倍速"):
         await native.execute(cmd("speed_start", rate=2), "phone")
+
+
+@pytest.mark.asyncio
+async def test_gear_change_uses_held_session_and_preserves_original_rate():
+    native, session = controller()
+    await native.execute(cmd("speed_start", rate=2), "phone")
+    await native.execute(cmd("speed_change", rate=3, session_id="different-session"), "phone")
+    assert session.rate == 3
+    assert native.boost["rate"] == 1.5
+    with pytest.raises(RuntimeError, match="重新长按"):
+        await native.execute(cmd("speed_change", rate=2), "other-phone")
+    await native.execute(cmd("speed_change", rate=2), "phone")
+    await native.execute(cmd("speed_end"), "phone")
+    assert session.rate == 1.5

@@ -114,12 +114,18 @@ class NativeController:
             command = message["cmd"]
             if command == "discover":
                 return await self.discover()
-            if command in {"speed_keep", "speed_end"}:
+            if command in {"speed_keep", "speed_end", "speed_change"}:
                 if self.boost and self.boost["owner"] == owner:
-                    if command == "speed_keep":
+                    if command == "speed_change":
+                        await self._checked(self.boost["session"].try_change_playback_rate_async(message["rate"]), "倍速切换")
+                        self.boost["deadline"] = time.monotonic() + 1.8
+                        return {"rate": message["rate"]}
+                    elif command == "speed_keep":
                         self.boost["deadline"] = time.monotonic() + 1.8
                     else:
                         await self._restore()
+                elif command == "speed_change":
+                    raise RuntimeError("临时倍速已结束，请重新长按")
                 return {}
             session = await self._session(message["session_id"])
             info = session.get_playback_info()

@@ -280,13 +280,15 @@ class BrowserController:
     async def execute(self, message, owner):
         async with self.lock:
             command = message["cmd"]
-            if command in {"speed_end", "speed_keep"}:
+            if command in {"speed_end", "speed_keep", "speed_change"}:
                 if self.boost and self.boost["owner"] == owner:
                     if command == "speed_end":
                         await self._restore()
                     else:
                         self.boost["deadline"] = time.monotonic() + 1.8
-                        await self._send(self.boost["page"], message, owner)
+                        return await self._send(self.boost["page"], message, owner)
+                elif command == "speed_change":
+                    raise RuntimeError("临时倍速已结束，请重新长按")
                 return {}
             page = await self._page()
             if command == "speed_start":

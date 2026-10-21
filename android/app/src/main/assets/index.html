@@ -5,7 +5,7 @@
 <body>
 <main id="pad" aria-label="触摸板：轻点播放，滑动调节，长按倍速"></main>
 <main id="remote" hidden>
-  <header><div><p class="eyebrow">BILI REMOTE</p><p id="deviceStatus"><span id="onlineDot"></span><span id="deviceName">正在连接电脑</span></p></div><button id="openSettings" class="icon-button" aria-label="连接与设置">⚙</button></header>
+  <header><div><p class="eyebrow">BILI REMOTE</p><p id="deviceStatus"><span id="onlineDot"></span><span id="deviceName">正在连接电脑</span></p></div><div class="header-actions"><button id="hapticToggle" class="icon-button haptic-toggle" type="button" aria-label="震动反馈" aria-pressed="true" title="震动反馈：开启"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="4" width="8" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m4 7-2 3 2 4-2 3m18-10 2 3-2 4 2 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button><button id="openSettings" class="icon-button" aria-label="连接与设置">⚙</button></div></header>
   <section class="remote-heading"><p class="eyebrow">让播放，随手掌控</p><h1>我的遥控器</h1><p id="remoteMessage">同一 WiFi，打开即连接</p></section>
   <section class="playback-disc" aria-label="播放控制">
     <button class="disc-control volume-up" data-command="volume" data-delta="0.05" aria-label="音量增大"><span class="volume-symbol" aria-hidden="true">+</span><span>音量加</span></button>
@@ -15,7 +15,7 @@
     <button class="disc-control volume-down" data-command="volume" data-delta="-0.05" aria-label="音量减小"><span class="volume-symbol" aria-hidden="true">−</span><span>音量减</span></button>
   </section>
   <div class="playback-status"><span>播放 / 暂停</span><span aria-hidden="true">·</span><span id="volumeText" aria-live="polite">音量</span></div>
-  <button id="holdSpeed" class="hold-speed"><span id="holdRate">2×</span><span>按住倍速 <small>松手恢复原速度</small></span></button>
+  <button id="holdSpeed" class="hold-speed" aria-label="按住倍速，左滑 2 倍，右滑 3 倍"><span class="speed-direction left" aria-hidden="true">‹</span><span id="holdRate">2×</span><span class="speed-copy">按住倍速 <small>左滑 2× · 右滑 3× · 松手恢复</small></span><span class="speed-direction right" aria-hidden="true">›</span></button>
   <button id="launchBrowser" class="launch-browser">打开电脑上的哔哩哔哩 <span>↗</span></button>
   <footer><button class="style-tab selected" data-style="remote">遥控器</button><button class="style-tab" data-style="touchpad">触摸板</button></footer>
 </main>
@@ -29,10 +29,11 @@
   <label>遥控器样式<select id="style"><option value="touchpad">触摸板 · 纯黑手势区域</option><option value="remote">传统遥控器 · 按键控制</option></select></label>
   <label>播放目标<select id="target"><option value="auto">自动选择</option><option value="browser">网页播放窗口</option><option value="native">Windows 客户端</option></select></label>
   <div id="nativeSettings" hidden><label>媒体会话<select id="session"><option value="">自动识别哔哩哔哩</option></select></label><button type="button" id="discover" class="secondary">检测客户端</button></div>
-  <label>长按倍速<select id="rate"><option value="1.5">1.5 倍</option><option value="2">2 倍</option><option value="3">3 倍</option><option value="4">4 倍</option></select></label>
+  <label>长按起始挡位<select id="rate"><option value="2">2 倍</option><option value="3">3 倍</option></select></label>
+  <label class="setting-switch" for="haptics"><span>震动反馈<small>长按触发、切换挡位时轻震一下</small></span><input id="haptics" type="checkbox" role="switch" checked></label>
   <p id="connectionStatus" class="description">正在连接电脑…</p><button type="submit" class="primary">开始遥控</button>
   <p class="description">触摸板：轻点播放 / 暂停，上下滑音量，左右滑进度，长按倍速。双指触摸或返回键可打开设置。</p>
 </form></dialog>
 <dialog id="pairing"><form id="pairingForm"><p class="eyebrow">只需配对一次</p><h2>连接这台电脑</h2><p id="pairingComputer" class="description"></p><label for="pairingCode">输入电脑显示的 6 位配对码</label><input id="pairingCode" class="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><p id="pairingMessage" class="description">配对成功后，下次打开自动连接。</p><button type="submit" class="primary">配对并连接</button><button type="button" id="cancelPairing" class="text-button">选择其他电脑</button></form></dialog>
-<script src="gestures.js"></script><script src="connection.js"></script><script src="remote.js"></script><script src="app.js"></script>
+<script src="remote.js"></script><script src="gestures.js"></script><script src="connection.js"></script><script src="app.js"></script>
 </body></html>

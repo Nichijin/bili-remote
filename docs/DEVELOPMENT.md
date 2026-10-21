@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
 
-本页面向维护者。当前项目版本为 **0.4.2**，安卓 `versionCode` 为 **6**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+本页面向维护者。当前项目版本为 **0.4.3**，安卓 `versionCode` 为 **7**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
 
 ## 项目结构
 
@@ -117,13 +117,13 @@ Python 便携构建、Gradle debug 和 release 构建均使用同一签名，并
 node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/smoke_gui.py
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
-.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.1
+.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.2
 .\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-debug.apk
 ```
 
-遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离的连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令，不代表安卓实机测试。
+遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动调用次数与开关持久化，不代表安卓实机震动测试。
 
-升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.4.1 → 0.4.2 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.4.2 → 0.4.3 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
 
 | 已验证范围 | 当前证据 |
 | --- | --- |
@@ -135,6 +135,8 @@ node --test tests/*.test.cjs
 | 仍待补充 | 实体安卓 WiFi、多品牌系统、真实触摸、实体手机覆盖安装及各版哔哩哔哩客户端兼容 |
 
 文档截图使用示例状态，不算作真实网络或实体手机测试结果。
+
+临时倍速使用 `speed_start`、`speed_change`、`speed_keep`、`speed_end`。切挡固定路由到当前长按持有的控制器及播放器，不能重新挑选目标或覆盖最初速度；页面和电脑端的超时机制继续负责恢复。手机的震动回调仅在进入长按或挡位实际改变时触发，Android Bridge 在主线程调用短促振动，受持久化开关和窗口前台状态约束。
 
 ## 分发校验
 

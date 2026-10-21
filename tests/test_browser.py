@@ -57,6 +57,10 @@ async def test_direct_browser_playback_without_extensions(tmp_path):
         assert result["volume"] == .8
         result = await browser.execute({"cmd": "speed_start", "rate": 3}, "phone")
         assert result["rate"] == 3
+        result = await browser.execute({"cmd": "speed_change", "rate": 2}, "phone")
+        assert result["rate"] == 2
+        result = await browser.execute({"cmd": "speed_change", "rate": 3}, "phone")
+        assert result["rate"] == 3
         await browser.execute({"cmd": "speed_end"}, "other-phone")
         assert (await browser.execute({"cmd": "status"}, "phone"))["rate"] == 3
         await browser.execute({"cmd": "speed_end"}, "phone")

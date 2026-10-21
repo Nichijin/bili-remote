@@ -8,9 +8,11 @@ config.device_name ||= window.Android ? Android.deviceName() : "手机浏览器"
 config.ui_style ||= "touchpad";
 if (!config.schema) { if (config.target === "browser") config.target = "auto"; config.schema = 2; }
 config.target ||= "auto";
-config.rate ||= 2;
+config.rate = Number(config.rate) === 3 ? 3 : 2;
+config.haptics = config.haptics !== false;
 delete config.token;
 let hudTimer, scanFallback, pairingTarget = null, computerListSignature = "";
+let speedPointer = null;
 function persist() {
   const text = JSON.stringify(config);
   if (window.Android) Android.saveSettings(text); else localStorage.setItem("bili-remote", text);
@@ -29,9 +31,21 @@ const send = (cmd, fields = {}) => connection.send(cmd, fields).then(result => {
   if (typeof result.paused === "boolean") byId("playSymbol").innerHTML = result.paused ? '<path d="M12 7 32 20 12 33Z"/>' : '<path d="M11 8h6v24h-6zM23 8h6v24h-6z"/>';
   return result;
 });
-const gestures = new GestureEngine({ send, hint, error, rate: () => Number(config.rate) });
-const hold = new HoldControl({ send, hint, error, rate: () => Number(config.rate) });
-function cancelControls() { gestures.cancel(); hold.stop(); byId("holdSpeed").classList.remove("holding"); }
+function haptic() {
+  if (!config.haptics) return;
+  try {
+    if (window.Android && Android.haptic) Android.haptic();
+    else if (navigator.vibrate) navigator.vibrate(22);
+  } catch { /* Devices without a vibrator still support all controls. */ }
+}
+function holdChanged(rate) {
+  byId("holdSpeed").classList.toggle("holding", rate !== null);
+  byId("holdSpeed").classList.toggle("gear-three", rate === 3);
+  byId("holdRate").textContent = `${rate ?? config.rate}×`;
+}
+const gestures = new GestureEngine({ send, hint, error, rate: () => config.rate, haptic, changed: holdChanged });
+const hold = new HoldControl({ send, hint, error, rate: () => config.rate, haptic, changed: holdChanged });
+function cancelControls() { gestures.cancel(); hold.stop(false); speedPointer = null; }
 function connectionState(state) {
   byId("connectionStatus").textContent = state.text;
   byId("deviceName").textContent = state.phase === "connected" ? state.name : state.text;
@@ -108,6 +122,15 @@ byId("nativeSettings").hidden = config.target !== "native";
 byId("rate").value = config.rate;
 byId("rate").onchange = () => { cancelControls(); config.rate = Number(byId("rate").value); byId("holdRate").textContent = `${config.rate}×`; persist(); };
 byId("holdRate").textContent = `${config.rate}×`;
+function renderHaptics() {
+  byId("haptics").checked = config.haptics;
+  byId("hapticToggle").setAttribute("aria-pressed", String(config.haptics));
+  byId("hapticToggle").title = `震动反馈：${config.haptics ? "开启" : "关闭"}`;
+}
+function setHaptics(enabled) { config.haptics = enabled; renderHaptics(); persist(); }
+byId("haptics").onchange = () => setHaptics(byId("haptics").checked);
+byId("hapticToggle").onclick = () => { setHaptics(!config.haptics); hint(config.haptics ? "震动反馈已开启" : "震动反馈已关闭"); };
+renderHaptics();
 byId("host").value = config.host || (location.protocol !== "file:" ? location.host : "");
 if (config.session_id) byId("session").add(new Option(config.session_id, config.session_id));
 byId("session").value = config.session_id || "";
@@ -147,11 +170,19 @@ document.querySelectorAll("[data-command]").forEach(button => button.onclick = a
 });
 byId("launchBrowser").onclick = () => send("open_browser").then(() => hint("已在电脑打开哔哩哔哩，请选择视频")).catch(error);
 const speedButton = byId("holdSpeed");
-speedButton.onpointerdown = event => { event.preventDefault(); speedButton.setPointerCapture(event.pointerId); speedButton.classList.add("holding"); hold.start(); };
-speedButton.onpointerup = speedButton.onpointercancel = speedButton.onlostpointercapture = () => { hold.stop(); speedButton.classList.remove("holding"); };
+speedButton.onpointerdown = event => {
+  if (speedPointer !== null || (event.pointerType === "mouse" && event.button !== 0)) return;
+  event.preventDefault(); speedPointer = event.pointerId;
+  speedButton.setPointerCapture(event.pointerId); hold.start(event.clientX);
+};
+speedButton.onpointermove = event => { if (event.pointerId === speedPointer) hold.move(event.clientX); };
+speedButton.onpointerup = speedButton.onpointercancel = speedButton.onlostpointercapture = event => {
+  if (event.pointerId !== speedPointer) return;
+  speedPointer = null; hold.stop();
+};
 speedButton.onkeydown = event => { if ([" ", "Enter"].includes(event.key) && !event.repeat) { event.preventDefault(); hold.start(); } };
 speedButton.onkeyup = event => { if ([" ", "Enter"].includes(event.key)) hold.stop(); };
-speedButton.onblur = () => hold.stop();
+speedButton.onblur = () => { speedPointer = null; hold.stop(); };
 const pointers = new Set(); let pointerId = null;
 byId("pad").onpointerdown = event => {
   event.preventDefault(); pointers.add(event.pointerId);
@@ -165,6 +196,7 @@ function finishPointer(event, canceled) {
 }
 window.addEventListener("pointerup", event => finishPointer(event, false));
 window.addEventListener("pointercancel", event => finishPointer(event, true));
+byId("pad").onlostpointercapture = event => finishPointer(event, true);
 window.addEventListener("blur", cancelControls);
 document.addEventListener("visibilitychange", () => { pointers.clear(); pointerId = null; window.setAppActive(!document.hidden); });
 window.addEventListener("pagehide", () => window.setAppActive(false));

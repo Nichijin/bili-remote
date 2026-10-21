@@ -289,7 +289,8 @@ def build_gestures():
             text(draw, (x + 220, y + 222), second, 23, MUTED)
         else:
             text(draw, (x + 220, y + 180), caption, 23, MUTED)
-    text(draw, (78, 934), "双指触摸 / Android 返回键：打开设置     ·     倍速可选 1.5 / 2 / 3 / 4", 25, CYAN)
+    text(draw, (78, 920), "长按后左右滑：左滑 2× / 右滑 3×，松手恢复原速", 25, CYAN)
+    text(draw, (78, 966), "开始长按、切换挡位各轻震一次；可在设置中关闭震动", 23, MUTED)
     image.save(OUTPUT / "gestures.png", optimize=True)
 
 
@@ -331,7 +332,7 @@ def build_hero():
     text(draw, (86, 550), "传统遥控器  /  纯黑触摸板", 28)
     draw.rounded_rectangle((82, 640, 664, 705), 16, fill="#263146")
     text(draw, (106, 655), "同一局域网 · 首次配对 · 后续自动重连", 25, CYAN)
-    text(draw, (85, 773), "v0.4.2  ·  Windows + Android", 24, MUTED)
+    text(draw, (85, 773), "v0.4.3  ·  Windows + Android", 24, MUTED)
     phone(image, RAW / "mobile-touchpad.png", 900, 145, 245)
     phone(image, RAW / "mobile-remote.png", 1220, 85, 265)
     text(draw, (925, 714), "纯黑手势区域", 24, MUTED)

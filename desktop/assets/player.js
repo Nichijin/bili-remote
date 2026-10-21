@@ -8,6 +8,15 @@
       boost = null;
     }
     async function execute(message) {
+      if (message.cmd === "speed_change") {
+        if (!boost || boost.owner !== message.owner) throw new Error("临时倍速已结束，请重新长按");
+        try {
+          boost.video.playbackRate = message.rate;
+          if (Math.abs(boost.video.playbackRate - message.rate) > .01) throw new Error("播放器拒绝了倍速操作");
+          boost.deadline = now() + 2200;
+          return { rate: boost.video.playbackRate };
+        } catch (error) { restore(); throw error; }
+      }
       if (message.cmd === "speed_end" || message.cmd === "speed_keep") {
         if (boost && boost.owner === message.owner) {
           if (message.cmd === "speed_end") restore();

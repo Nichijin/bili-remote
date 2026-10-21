@@ -1,7 +1,9 @@
 (function (root) {
+  const HoldControl = root.HoldControl || (typeof require !== "undefined" ? require("./remote.js").HoldControl : null);
   class GestureEngine {
-    constructor({ send, hint = () => {}, error = () => {}, rate = () => 2, timers = globalThis }) {
+    constructor({ send, hint = () => {}, error = () => {}, rate = () => 2, haptic = () => {}, changed = () => {}, timers = globalThis }) {
       Object.assign(this, { send, hint, error, rate, timers });
+      this.hold = new HoldControl({ send, hint, error, rate, haptic, changed, timers });
       this.current = null;
     }
     emit(cmd, fields = {}) {
@@ -9,25 +11,19 @@
     }
     down(x, y, width, height) {
       this.cancel();
-      const g = { x, y, lastY: y, width, height, mode: "pending", volume: 0 };
+      const g = { x, y, lastX: x, lastY: y, width, height, mode: "pending", volume: 0 };
       this.current = g;
       g.timer = this.timers.setTimeout(() => {
         if (this.current !== g || g.mode !== "pending") return;
         g.mode = "hold";
-        this.hint(`临时 ${this.rate()} 倍速`);
-        Promise.resolve().then(() => this.send("speed_start", { rate: this.rate() })).catch(error => {
-          if (this.current === g && g.mode === "hold") {
-            this.stopHold(g); g.mode = "failed";
-            this.emit("speed_end");
-          }
-          this.error(error);
-        });
-        g.keep = this.timers.setInterval(() => this.emit("speed_keep"), 400);
+        this.hold.start(g.lastX);
       }, 500);
     }
     move(x, y) {
       const g = this.current;
-      if (!g || g.mode === "hold" || g.mode === "failed") return;
+      if (!g) return;
+      g.lastX = x;
+      if (g.mode === "hold") { this.hold.move(x); return; }
       const dx = x - g.x, dy = y - g.y;
       if (g.mode === "pending") {
         if (Math.max(Math.abs(dx), Math.abs(dy)) < 12) return;
@@ -50,16 +46,15 @@
     }
     stopHold(g) {
       this.timers.clearTimeout(g.timer);
-      if (g.keep != null) this.timers.clearInterval(g.keep);
     }
     up(x, y) {
       const g = this.current;
       if (!g) return;
-      this.move(x, y);
+      if (g.mode !== "hold") this.move(x, y);
       this.stopHold(g);
       this.current = null;
       if (g.mode === "pending") this.emit("toggle");
-      else if (g.mode === "hold") { this.emit("speed_end"); this.hint("恢复原播放速度"); }
+      else if (g.mode === "hold") this.hold.stop();
       else if (g.mode === "seek" && g.seek) this.emit("seek", { delta: Math.round(g.seek) });
       else if (g.mode === "volume" && Math.abs(g.volume) > 0.001) this.emit("volume", { delta: g.volume });
     }
@@ -68,7 +63,7 @@
       if (!g) return;
       this.stopHold(g);
       this.current = null;
-      if (g.mode === "hold") this.emit("speed_end");
+      if (g.mode === "hold") this.hold.stop(false);
     }
   }
   root.GestureEngine = GestureEngine;

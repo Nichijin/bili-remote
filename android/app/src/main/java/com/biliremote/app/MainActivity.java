@@ -3,6 +3,8 @@ package com.biliremote.app;
 import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -98,6 +100,18 @@ public final class MainActivity extends Activity {
             return value;
         }
         @JavascriptInterface public String deviceName() { return Build.MANUFACTURER + " " + Build.MODEL; }
+        @JavascriptInterface public void haptic() {
+            runOnUiThread(new Runnable() { @Override public void run() {
+                if (isFinishing() || isDestroyed() || !hasWindowFocus()) return;
+                try {
+                    JSONObject settings = new JSONObject(getSharedPreferences("remote", MODE_PRIVATE).getString("settings", "{}"));
+                    if (!settings.optBoolean("haptics", true)) return;
+                    Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+                    if (vibrator != null && vibrator.hasVibrator())
+                        vibrator.vibrate(VibrationEffect.createOneShot(22, VibrationEffect.DEFAULT_AMPLITUDE));
+                } catch (Exception ignored) { /* Vibration is optional on all devices. */ }
+            }});
+        }
         @JavascriptInterface public void stopDiscovery() { MainActivity.this.stopDiscovery(); }
         @JavascriptInterface public void discoverComputers() { startDiscovery(); }
         @JavascriptInterface public void startDiscovery() {

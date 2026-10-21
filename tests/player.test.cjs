@@ -35,3 +35,21 @@ test('seek honors seekable range', async () => {
   video.seekable = { length: 1, start: () => 20, end: () => 80 };
   await player.execute({ cmd: 'seek', delta: -120 }); assert.equal(video.currentTime, 20);
 });
+
+test('changing gears retains the original rate and never changes owner', async () => {
+  const { player, video } = setup();
+  await player.execute({ cmd: 'speed_start', rate: 2, owner: 'a' });
+  await player.execute({ cmd: 'speed_change', rate: 3, owner: 'a' }); assert.equal(video.playbackRate, 3);
+  await assert.rejects(player.execute({ cmd: 'speed_change', rate: 2, owner: 'b' }), /重新长按/);
+  assert.equal(video.playbackRate, 3);
+  await player.execute({ cmd: 'speed_change', rate: 2, owner: 'a' });
+  await player.execute({ cmd: 'speed_end', owner: 'a' }); assert.equal(video.playbackRate, 1.5);
+  await assert.rejects(player.execute({ cmd: 'speed_change', rate: 3, owner: 'a' }), /重新长按/);
+});
+
+test('watchdog after gear changes still restores the initial rate', async () => {
+  const { player, video, advance } = setup();
+  await player.execute({ cmd: 'speed_start', rate: 2, owner: 'a' });
+  await player.execute({ cmd: 'speed_change', rate: 3, owner: 'a' });
+  advance(2500); player.expire(); assert.equal(video.playbackRate, 1.5);
+});

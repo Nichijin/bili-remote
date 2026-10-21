@@ -18,7 +18,8 @@ config={'schema':2,'ui_style':'remote','device_id':'layout-test-phone','device_n
 fixture='''
 const sample=__CONFIG__;
 window.sentCommands=[];
-window.Android={loadSettings:()=>JSON.stringify(sample),saveSettings:()=>{},deviceId:()=>sample.device_id,deviceName:()=>sample.device_name,startDiscovery:()=>{},stopDiscovery:()=>{}};
+window.hapticPulses=0;
+window.Android={loadSettings:()=>localStorage.getItem('smoke-settings')||JSON.stringify(sample),saveSettings:text=>localStorage.setItem('smoke-settings',text),haptic:()=>window.hapticPulses++,deviceId:()=>sample.device_id,deviceName:()=>sample.device_name,startDiscovery:()=>{},stopDiscovery:()=>{}};
 window.WebSocket=class{
  static OPEN=1;
  constructor(){this.readyState=0;setTimeout(()=>{this.readyState=1;this.onopen?.()},10)}
@@ -59,6 +60,45 @@ with sync_playwright() as p:
             page.wait_for_function('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").length===5')
             commands=page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").map(({cmd,delta})=>({cmd,...(delta===undefined?{}:{delta})}))')
             assert commands==[{'cmd':'volume','delta':0.05},{'cmd':'volume','delta':-0.05},{'cmd':'seek','delta':-10},{'cmd':'seek','delta':10},{'cmd':'toggle'}],commands
+            if width == 390:
+                page.evaluate('window.sentCommands=[];window.hapticPulses=0')
+                button=page.locator('#holdSpeed')
+                button.scroll_into_view_if_needed()
+                rect=button.bounding_box(); x,y=rect['x']+rect['width']/2,rect['y']+rect['height']/2
+                page.mouse.move(x,y);page.mouse.down()
+                page.wait_for_function('window.hapticPulses===1')
+                page.mouse.move(x+60,y)
+                page.wait_for_function('window.hapticPulses===2')
+                assert page.locator('#holdRate').inner_text()=='3×'
+                for offset in [65,62,70,61]: page.mouse.move(x+offset,y)
+                assert page.evaluate('window.hapticPulses')==2
+                page.mouse.move(x,y);page.mouse.up()
+                page.wait_for_function('window.sentCommands.some(m=>m.cmd==="speed_end")')
+                assert page.evaluate('window.hapticPulses')==3
+                assert page.evaluate('window.sentCommands.filter(m=>m.cmd?.startsWith("speed_") && m.cmd!=="speed_keep").map(m=>m.cmd)')==['speed_start','speed_change','speed_change','speed_end']
+                page.get_by_role('button',name='震动反馈',exact=True).click()
+                assert page.locator('#hapticToggle').get_attribute('aria-pressed')=='false'
+                page.reload();page.locator('body.connected').wait_for()
+                assert page.locator('#hapticToggle').get_attribute('aria-pressed')=='false'
+                page.locator('[data-style="touchpad"]').click()
+                page.evaluate('window.sentCommands=[];window.hapticPulses=0')
+                page.mouse.move(150,300);page.mouse.down();page.wait_for_timeout(560)
+                page.mouse.move(215,300);page.mouse.move(150,300);page.mouse.up()
+                page.wait_for_function('window.sentCommands.some(m=>m.cmd==="speed_end")')
+                assert page.evaluate('window.hapticPulses')==0
+                assert page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping" && m.cmd!=="speed_keep").map(m=>m.cmd)')==['speed_start','speed_change','speed_change','speed_end']
+                # Re-enable from settings in touchpad mode; both entry points sync.
+                page.evaluate('window.openSettings()')
+                page.locator('#haptics').check()
+                assert page.locator('#hapticToggle').get_attribute('aria-pressed')=='true'
+                page.locator('#closeSettings').click()
+                page.evaluate('window.sentCommands=[];window.hapticPulses=0')
+                page.mouse.move(150,300);page.mouse.down();page.wait_for_timeout(560)
+                page.mouse.move(215,300);page.mouse.move(150,300);page.mouse.up()
+                page.wait_for_function('window.sentCommands.some(m=>m.cmd==="speed_end")')
+                assert page.evaluate('window.hapticPulses')==3
+                assert page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping" && m.cmd!=="speed_keep").map(m=>m.cmd)')==['speed_start','speed_change','speed_change','speed_end']
+                print('Both modes: actual pointer input, detent haptics, persisted off switch and restored settings passed')
             report.append({'viewport':f'{width}x{height}','circle_diameter':round(disc['w'],1),'controls_inside_ring':True,'minimum_touch_target':44,'commands_correct':True})
             context.close()
     finally:browser.close()
