@@ -6,6 +6,7 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 from desktop.server import Relay
+from desktop.browser import BrowserController
 from desktop.trust import TrustStore
 
 
@@ -35,6 +36,32 @@ class FakeBrowser:
 
 def make_relay(tmp_path, feedback=None):
     return Relay(NoNative(), trust=TrustStore(tmp_path / "trust.json"), browser=FakeBrowser(), feedback=feedback)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["auto", "browser"])
+@pytest.mark.parametrize("message", [
+    {"cmd": "toggle"}, {"cmd": "seek", "delta": -10}, {"cmd": "seek", "delta": 10},
+    {"cmd": "volume", "delta": -.05}, {"cmd": "volume", "delta": .05},
+    {"cmd": "speed_start", "rate": 2}, {"cmd": "status"},
+])
+async def test_remote_commands_never_launch_a_closed_browser(tmp_path, monkeypatch, target, message):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    stale_endpoint = profile / "DevToolsActivePort"
+    stale_endpoint.write_bytes(b"stale endpoint must remain unchanged")
+    browser = BrowserController(profile=profile, executable=tmp_path / "msedge.exe")
+    monkeypatch.setattr(browser, "_profile_process", lambda: None)
+    def unexpected_launch(*args, **kwargs):
+        raise AssertionError("Remote commands must never launch a browser")
+    monkeypatch.setattr("desktop.browser.subprocess.Popen", unexpected_launch)
+    relay = Relay(NoNative(), trust=TrustStore(tmp_path / "trust.json"), browser=browser)
+    with pytest.raises(RuntimeError, match="手机设置"):
+        await relay.execute({**message, "target": target}, "phone")
+    await relay.release("phone")
+    assert not browser.running and browser.process is None
+    assert not relay.held_targets
+    assert stale_endpoint.read_bytes() == b"stale endpoint must remain unchanged"
 
 
 async def authenticate(ws, token="", device_id="phone-1234", pin=""):

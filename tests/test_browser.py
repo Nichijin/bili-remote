@@ -65,6 +65,10 @@ async def test_direct_browser_playback_without_extensions(tmp_path):
         assert (await browser.execute({"cmd": "status"}, "phone"))["rate"] == 3
         await browser.execute({"cmd": "speed_end"}, "phone")
         assert (await browser.execute({"cmd": "status"}, "phone"))["rate"] == 1.5
+        # A fresh controller can attach to the already opened window without opening another.
+        attached = BrowserController(profile=browser.profile, executable=executable, allowed_hosts={"127.0.0.1"}, headless=True)
+        assert (await attached.execute({"cmd": "status"}, "phone"))["rate"] == 1.5
+        assert attached.process is None
         await browser.execute({"cmd": "speed_start", "rate": 2}, "phone")
         browser.boost["deadline"] = 0
         assert await browser.expire()
@@ -101,6 +105,27 @@ async def test_existing_playback_window_is_reused_and_endpoint_preserved(tmp_pat
     finally:
         await reused.close()
         await original.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_window_close_is_not_undone_by_remote_commands(tmp_path, monkeypatch):
+    browser = BrowserController(profile=tmp_path / "profile", launch_url="about:blank", headless=True)
+    try:
+        await browser.open()
+        await browser.rpc(browser.browser_socket, "Browser.close")
+        await asyncio.to_thread(browser.browser_process.wait, 5)
+        def unexpected_launch(*args, **kwargs):
+            raise AssertionError("A closed playback window must stay closed")
+        with monkeypatch.context() as context:
+            context.setattr("desktop.browser.subprocess.Popen", unexpected_launch)
+            with pytest.raises(RuntimeError, match="手机设置"):
+                await browser.execute({"cmd": "toggle"}, "phone")
+        assert not browser.running
+        # Only the explicit open action can create another playback window.
+        assert (await browser.open())["opened"]
+        assert browser.running
+    finally:
+        await browser.close()
 
 
 @pytest.mark.asyncio

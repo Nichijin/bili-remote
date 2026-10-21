@@ -126,6 +126,9 @@ def capture_mobile():
                             page.screenshot(path=str(RAW / "mobile-settings.png"))
                             page.locator("#manualDetails summary").click()
                             page.screenshot(path=str(RAW / "mobile-history.png"))
+                            page.locator("#manualDetails summary").click()
+                            page.locator("#launchBrowser").scroll_into_view_if_needed()
+                            page.screenshot(path=str(RAW / "mobile-player-settings.png"))
                     context.close()
             finally:
                 browser.close()
@@ -243,13 +246,13 @@ def build_mobile_setup():
 
 
 def build_redesign():
-    image, draw = canvas(1120, 1180, "按键遥控器与设置", "0.4.4 页面渲染 · 连接数据为示例")
+    image, draw = canvas(1120, 1180, "按键遥控器与设置", "0.4.5 页面渲染 · 连接数据为示例")
     for x, title, path in [(165, "一体圆环 · 按住滑动换挡", "mobile-remote.png"),
-                           (665, "分组设置 · 内容可滚动", "mobile-settings.png")]:
+                           (665, "播放器 · 手动打开视频", "mobile-player-settings.png")]:
         text(draw, (x - 30, 184), title, 24, bold=True)
         phone(image, RAW / path, x, 242, 300)
     text(draw, (80, 1000), "上下调节音量，左右跳转进度，中央播放 / 暂停", 25, CYAN)
-    text(draw, (80, 1055), "保留 2 / 3 倍滑动切挡、震动开关与自动重连", 23, MUTED)
+    text(draw, (80, 1055), "按键不会自动打开视频；主动打开入口在设置中", 23, MUTED)
     text(draw, (80, 1112), "设计参考与实现取舍见 docs/DESIGN_REFERENCES.md", 19, MUTED)
     image.save(OUTPUT / "remote-redesign.png", optimize=True)
 
@@ -344,7 +347,7 @@ def build_hero():
     text(draw, (86, 550), "传统遥控器  /  纯黑触摸板", 28)
     draw.rounded_rectangle((82, 640, 664, 705), 16, fill="#263146")
     text(draw, (106, 655), "同一局域网 · 首次配对 · 后续自动重连", 25, CYAN)
-    text(draw, (85, 773), "v0.4.4  ·  Windows + Android", 24, MUTED)
+    text(draw, (85, 773), "v0.4.5  ·  Windows + Android", 24, MUTED)
     phone(image, RAW / "mobile-touchpad.png", 900, 145, 245)
     phone(image, RAW / "mobile-remote.png", 1220, 85, 265)
     text(draw, (925, 714), "纯黑手势区域", 24, MUTED)

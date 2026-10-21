@@ -180,7 +180,19 @@ document.querySelectorAll("[data-command]").forEach(button => button.onclick = a
     else if (cmd === "toggle") byId("remoteMessage").textContent = "已发送播放操作";
   } catch (failure) { error(failure); }
 });
-byId("launchBrowser").onclick = () => send("open_browser").then(() => hint("已在电脑打开哔哩哔哩，请选择视频")).catch(error);
+byId("launchBrowser").onclick = async () => {
+  const button = byId("launchBrowser"), message = byId("browserMessage");
+  button.disabled = true;
+  message.textContent = "正在电脑打开哔哩哔哩…";
+  try {
+    await send("open_browser");
+    message.textContent = "已在电脑打开网页播放窗口，请选择视频。";
+    hint(message.textContent);
+  } catch (failure) {
+    message.textContent = failure.message || String(failure);
+    error(failure);
+  } finally { button.disabled = false; }
+};
 const speedButton = byId("holdSpeed");
 speedButton.onpointerdown = event => {
   if (speedPointer !== null || (event.pointerType === "mouse" && event.button !== 0)) return;

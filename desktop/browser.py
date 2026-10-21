@@ -135,7 +135,8 @@ class BrowserController:
             pass
         return None
 
-    async def _ensure(self):
+    async def _ensure(self, *, allow_launch=False):
+        """Attach to our existing browser; only an explicit open may launch it."""
         if self.running:
             try:
                 version = await asyncio.to_thread(self._json, "/json/version")
@@ -146,9 +147,7 @@ class BrowserController:
         self.port = None
         self.browser_socket = None
         self.browser_process = None
-        self.profile.mkdir(parents=True, exist_ok=True)
         self.executable = self.executable or find_browser()
-        active_port = self.profile / "DevToolsActivePort"
         owner = await asyncio.to_thread(self._profile_process)
         if owner:
             endpoint = await asyncio.to_thread(self._read_endpoint, owner)
@@ -158,7 +157,11 @@ class BrowserController:
                 self.port, self.browser_socket = endpoint
                 self.browser_process = owner
                 return
-        else:
+        if not allow_launch:
+            raise RuntimeError("未发现可控制的哔哩哔哩播放窗口；请手动打开客户端并播放视频，或在手机设置的“播放器”中点击“在电脑打开哔哩哔哩”")
+        self.profile.mkdir(parents=True, exist_ok=True)
+        active_port = self.profile / "DevToolsActivePort"
+        if not owner:
             # Remove stale metadata only after verifying no browser owns the profile.
             active_port.unlink(missing_ok=True)
         arguments = [str(self.executable), "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--user-data-dir=" + str(self.profile), "--no-first-run", "--no-default-browser-check"]
@@ -191,7 +194,7 @@ class BrowserController:
 
     async def open(self):
         async with self.lock:
-            await self._ensure()
+            await self._ensure(allow_launch=True)
             if self.browser_socket:
                 pages = await asyncio.to_thread(self._json, "/json/list")
                 pages = [page for page in pages if page.get("type") == "page" and self.allowed(page.get("url", ""))]

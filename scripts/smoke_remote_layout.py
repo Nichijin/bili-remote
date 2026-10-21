@@ -60,6 +60,7 @@ with sync_playwright() as p:
             page.wait_for_function('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").length===5')
             commands=page.evaluate('window.sentCommands.filter(m=>m.cmd && m.cmd!=="ping").map(({cmd,delta})=>({cmd,...(delta===undefined?{}:{delta})}))')
             assert commands==[{'cmd':'volume','delta':0.05},{'cmd':'volume','delta':-0.05},{'cmd':'seek','delta':-10},{'cmd':'seek','delta':10},{'cmd':'toggle'}],commands
+            assert page.locator('#remote #launchBrowser').count()==0
             # The sheet header/actions remain reachable while its content scrolls.
             page.locator('#deviceStatus').click()
             page.locator('#settings[open]').wait_for()
@@ -73,6 +74,11 @@ with sync_playwright() as p:
             page.locator('#target').select_option('native')
             assert page.locator('#nativeSettings').is_visible()
             page.locator('#discover').scroll_into_view_if_needed()
+            assert page.evaluate('window.sentCommands.filter(m=>m.cmd==="open_browser").length')==0
+            page.locator('#settings #launchBrowser').click()
+            page.wait_for_function('window.sentCommands.filter(m=>m.cmd==="open_browser").length===1 && !document.querySelector("#launchBrowser").disabled')
+            assert page.locator('#settings').evaluate('e=>e.open'), 'Opening a player must not submit the settings form'
+            assert '已在电脑打开' in page.locator('#browserMessage').inner_text()
             page.locator('#target').select_option('auto')
             assert page.locator('#nativeSettings').is_hidden()
             page.locator('#rate').select_option('3')
