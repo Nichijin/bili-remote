@@ -60,6 +60,9 @@ def main():
         exe, uninstaller = app_dir / "BiliRemote-Desktop.exe", app_dir / "unins000.exe"
         uninstall_key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{" + identifier + "}_is1"
         assert exe.is_file() and uninstaller.is_file()
+        assert (app_dir / "docs/USAGE.md").is_file(), "Offline usage guide is missing"
+        for asset in (ROOT / "docs/images").glob("*.png"):
+            assert (app_dir / "docs/images" / asset.name).read_bytes() == asset.read_bytes(), "Offline illustration is missing or changed"
         assert registry_exists(uninstall_key)
         assert read_value(RUN_KEY, identity) is None, "Autostart must default to disabled"
         # Exercise the actual application's startup integration with a unique test value,

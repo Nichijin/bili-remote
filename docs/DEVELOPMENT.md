@@ -1,0 +1,153 @@
+# 开发与构建说明
+
+[项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
+
+本页面向维护者。当前项目版本为 **0.4.1**，安卓 `versionCode` 为 **5**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+
+## 项目结构
+
+```text
+android/                 安卓 Activity、WebView 资源与图标
+desktop/                 Windows 窗口、播放控制、发现、授权与反馈
+installer/               Inno Setup 安装、升级和卸载
+scripts/                 打包、自检、升级验证和文档配图生成
+tests/                   Python 与 Node 测试
+docs/                    使用文档及配图
+dist/                    构建产物，不进入 Git
+.tooling/                本地工具与临时验证文件，不进入 Git
+```
+
+## 本地运行电脑端
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe run_desktop.py
+```
+
+源码启动需要 Python；安装包用户不需要。电脑端以普通用户权限运行，无需安装 Windows 服务。依赖中的 Windows Runtime 和音频接口需要 Windows 环境。
+
+## 两条播放控制路径
+
+```mermaid
+flowchart LR
+    A[安卓 WebView 遥控界面] -->|局域网指令与独立授权| B[Windows 电脑端]
+    B -->|自动管理的本机连接| C[专用 Edge / Chrome 播放窗口]
+    B -->|Windows 媒体与应用音频接口| D[哔哩哔哩 Windows 客户端]
+    B --> E[桌面反馈与操作记录]
+```
+
+网页路径使用系统已安装的 Edge / Chrome，以独立资料目录启动浏览器，通过仅绑定本机回环地址的随机调试端口控制。无需扩展，也不捆绑浏览器内核。普通浏览器标签页不保证受控。
+
+客户端路径使用 GSMTC 检查与调用媒体会话、使用 pycaw 控制应用音频会话。`discover` 返回暂停、进度、倍速等实际可用能力。版本扫描每 15 秒更新运行状态，每 60 秒刷新安装记录；未知版本显示“未知”，未运行的便携客户端可能无法从安装记录发现。
+
+音频排查可使用命令行服务指定进程名，例如将 `实际进程名.exe` 换成客户端真实进程：
+
+```powershell
+.\.venv\Scripts\python.exe -m desktop.server --audio-process 实际进程名.exe
+```
+
+这是命令行服务参数，不是桌面 GUI 启动参数。不要把 `run_desktop.py --audio-process ...` 当成已实现的配置入口。
+
+## 网络与授权
+
+| 通道 | 默认端口 | 用途 |
+| --- | --- | --- |
+| TCP / WebSocket | 8765 | 接收控制和认证 |
+| UDP，电脑监听 | 8766 | 回复手机发现请求 |
+| UDP，手机监听 | 8767 | 接收电脑每 2 秒发送的在线广播 |
+
+手机主动扫描与被动监听并用。广播包含电脑名称、稳定标识及端口，不包含 PIN 或授权密钥。首次使用 6 位 PIN 认证，后续使用每部手机的随机密钥；PIN 每 10 分钟刷新，有错误配对限流。
+
+当前局域网通信未实现 TLS，不提供抵御恶意网络监听或中间人攻击的加密保障。独立授权不能代替传输加密。适用于可信局域网，不应直接开放公网端口。
+
+## 本地数据
+
+Windows 默认目录：`%LOCALAPPDATA%\BiliGestureRemote`。
+
+| 文件 / 目录 | 内容 |
+| --- | --- |
+| `trust.json` | 稳定电脑标识及已授权手机凭据 |
+| `settings.json` | 电脑端偏好 |
+| `remote.log`、`.1`、`.2` | 错误日志，最多 3 个文件，每个 256 KiB |
+| `browser-profile/` | 专用播放窗口的资料与登录数据 |
+
+安卓通过 `remote` SharedPreferences 保留手机标识与设置 JSON，包括授权、地址记录、样式、目标和倍速。覆盖安装保留应用数据，卸载或清除数据不会保留这些记录。
+
+不要把授权文件、浏览器资料、真实配对码或签名私钥提交到 Git。单独备份并妥善保管原安卓签名；公开证书指纹不能恢复私钥。
+
+## 构建 Windows 安装包
+
+安装 PyInstaller 和 Inno Setup 6 后执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install pyinstaller
+.\.venv\Scripts\python.exe scripts/build_desktop.py
+.\.venv\Scripts\python.exe scripts/build_installer.py --compiler "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+```
+
+若使用本项目本地工具缓存中的编译器，可省略 `--compiler`。脚本默认检查 `.tooling/inno/ISCC.exe`，不会自动安装 Inno Setup。编译前确认使用场景符合构建工具的许可。
+
+构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup.exe`。普通用户分发安装器即可。
+
+安装器固定 AppId，沿用实际旧安装路径，正常退出运行中的程序后替换文件。升级不调用旧卸载器，避免清空数据。保留实际自启和桌面快捷方式状态，原本运行的实例安装后恢复到托盘。支持同版本修复，拒绝较低版本降级。
+
+真正卸载才清理程序、自启、登记、授权和专用资料；清理该程序的防火墙规则可能需要管理员权限，拒绝时会提示，静默卸载写日志。
+
+## 构建安卓 APK
+
+Android Studio 可以打开 `android/`；Windows 也可使用便携构建脚本：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/build_apk.py
+```
+
+脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-debug.apk`。无需安装到全局工具路径。
+
+**从新克隆的仓库不能直接生成可覆盖现有用户版本的 APK。** 维护者必须先把原签名恢复到 `android/signing/app.keystore`。该私钥不在仓库中；旧项目若仍有 `.tooling/debug.keystore`，脚本会核对证书后复制原密钥。密钥缺失或不匹配时停止，不会静默生成不同身份。
+
+Python 便携构建、Gradle debug 和 release 构建均使用同一签名，并与 `android/signing/certificate.sha256` 核对。历史密钥是开发签名，沿用它是为了覆盖兼容，不能据此声称已具备生产分发的密钥管理。细节见[仓库签名说明](https://github.com/Nichijin/bili-remote/blob/main/android/signing/README.md)。
+
+发布新版本时保持 `applicationId` 为 `com.biliremote.app`，递增 `versionCode`，更新 `versionName` 和 Windows 安装器的 `AppVersion`。签名、包名和数据存储位置改变都需要明确的迁移设计，不能只改版本名称。
+
+## 测试与升级验证
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+node --test tests/*.test.cjs
+.\.venv\Scripts\python.exe scripts/smoke_gui.py
+.\.venv\Scripts\python.exe scripts/smoke_installer.py
+.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.0
+.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-debug.apk
+```
+
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。当前升级冒烟脚本断言的版本为 0.4.0 → 0.4.1；后续发版时同步更新基线和版本断言。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+
+| 已验证范围 | 当前证据 |
+| --- | --- |
+| 播放控制 | 真实无头 Edge / Chrome、本地媒体夹具，覆盖暂停、进度、音量、临时倍速及恢复 |
+| 配对与连接 | PIN、保存凭据重连、广播、IP 改变和手势测试 |
+| 桌面反馈 | GUI 冒烟、浮层不抢焦点及操作记录 |
+| Windows 覆盖 | 独立身份的实际 0.4.0 → 0.4.1 安装、重连、保留数据、自启、同版本修复、拒绝降级及干净卸载 |
+| Android 更新包 | 旧新 APK 包名、证书和版本代码一致性检查 |
+| 仍待补充 | 实体安卓 WiFi、多品牌系统、真实触摸、实体手机覆盖安装及各版哔哩哔哩客户端兼容 |
+
+文档截图使用示例状态，不算作真实网络或实体手机测试结果。
+
+## 分发校验
+
+两端构建完成后，可生成可选整合包和校验文件：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/package_kit.py
+```
+
+产物是 `dist/bili-remote-kit.zip` 与 `dist/SHA256.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+
+电脑程序和 Windows 安装器同时打包 `docs/`，让安装后的说明可以访问本地配图。更新文档后重新构建才会更新本地安装包，GitHub 文档更新不会自动替换用户电脑中的文件。
+
+## 图标与文档图片
+
+图标源文件在 `desktop/assets/` 和 `android/artwork/`。图标绘制脚本为 `scripts/draw_icon.py`、`scripts/draw_android_icon.py`；绘制时需要 Pillow，运行电脑软件不依赖 Pillow。安卓提供自适应图标与 Android 13 单色图标，电脑使用原生托盘。
+
+文档图片的可复现生成方式见[配图说明](images/README.md)。更新界面后同步重渲染，避免文档与软件实际入口不一致。
