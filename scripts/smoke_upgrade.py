@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -67,6 +68,10 @@ def main():
     arguments = parser.parse_args()
     baseline = arguments.baseline.resolve()
     assert (baseline / "BiliRemote.iss").is_file() and (baseline / "BiliRemote-Desktop.exe").is_file()
+    baseline_source = (baseline / "BiliRemote.iss").read_text(encoding="utf-8")
+    version_pattern = r'#define\s+AppVersion\s+"([^"]+)"'
+    old_version = re.search(version_pattern, baseline_source).group(1)
+    new_version = re.search(version_pattern, (ROOT / "installer/BiliRemote.iss").read_text(encoding="utf-8")).group(1)
     identifier = str(uuid.uuid4())
     identity, label = "BiliRemote-UpgradeTest-" + identifier[:8], "BiliRemote upgrade test " + identifier[:8]
     tooling = (ROOT / ".tooling").resolve()
@@ -112,10 +117,12 @@ def main():
     complete = False
     try:
         # Compile the old install script and actual old binary with isolated identity.
-        source = (baseline / "BiliRemote.iss").read_text(encoding="utf-8")
+        source = baseline_source
         replacements = {
             r"..\dist\{#AppExe}": str(baseline / "BiliRemote-Desktop.exe"),
             r"..\README.md": str(ROOT / "README.md"),
+            r"..\CHANGELOG.md": str(ROOT / "CHANGELOG.md"),
+            r"..\docs\*": str(ROOT / "docs/*"),
             r"..\desktop\assets\bili-remote.ico": str(ROOT / "desktop/assets/bili-remote.ico"),
             '"ChineseSimplified.isl"': '"' + str(ROOT / "installer/ChineseSimplified.isl") + '"',
             'Source: "firewall-cleanup.ps1"': 'Source: "' + str(ROOT / "installer/firewall-cleanup.ps1") + '"',
@@ -124,11 +131,11 @@ def main():
             source = source.replace(old, new)
         old_script = folder / "old.iss"
         old_script.write_text(source, encoding="utf-8-sig")
-        old_setup = compile_setup(old_script, "old")
+        old_setup = compile_setup(old_script, "old", "/DAppSourcePath=" + str(baseline))
         new_setup = compile_setup(ROOT / "installer/BiliRemote.iss", "new")
         lower_setup = compile_setup(ROOT / "installer/BiliRemote.iss", "downgrade", "/DAppVersion=0.3.99")
         install(old_setup, "initial", "/DIR=" + str(app_dir), "/TASKS=desktopicon")
-        assert read_value(uninstall_key, "DisplayVersion") == "0.4.0"
+        assert read_value(uninstall_key, "DisplayVersion") == old_version
         assert read_value(RUN_KEY, identity) is None
         assert desktop_link.is_file()
         # Settings changed from the app after installation must win over installer history.
@@ -153,7 +160,7 @@ def main():
         old_process.wait(timeout=15)
         wait_service(True)
         assert not alternative.exists()
-        assert read_value(uninstall_key, "DisplayVersion") == "0.4.1"
+        assert read_value(uninstall_key, "DisplayVersion") == new_version
         assert Path(read_value(uninstall_key, "InstallLocation")).resolve() == app_dir
         assert hashlib.sha256(exe.read_bytes()).digest() == hashlib.sha256((ROOT / "dist/BiliRemote-Desktop.exe").read_bytes()).digest()
         assert len(list(app_dir.glob("unins*.exe"))) == 1
@@ -176,14 +183,14 @@ def main():
         # An old setup must refuse to replace the new version or alter its data.
         result = install(lower_setup, "reject-downgrade", success=False)
         assert result.returncode != 0
-        assert read_value(uninstall_key, "DisplayVersion") == "0.4.1"
+        assert read_value(uninstall_key, "DisplayVersion") == new_version
         assert_data()
         # Test an explicit silent task change as well as preserving existing state.
         install(new_setup, "explicit-autostart-off", "/TASKS=")
         assert read_value(RUN_KEY, identity) is None
         assert read_value(APPROVAL_KEY, identity) is None
         assert_data()
-        report = {"old_to_new_upgrade": "0.4.0 -> 0.4.1", "original_directory_retained": True,
+        report = {"old_to_new_upgrade": old_version + " -> " + new_version, "original_directory_retained": True,
                   "one_installation": True, "running_instance_restarted": True,
                   "settings_preserved": True, "browser_profile_preserved": True,
                   "computer_identity_preserved": True, "saved_phone_reconnected_without_pin": True,

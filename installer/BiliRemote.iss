@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.4.1"
+  #define AppVersion "0.4.2"
 #endif
 #define AppExe "BiliRemote-Desktop.exe"
 #ifndef AppSourcePath
@@ -58,6 +58,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 [Files]
 Source: "{#AppSourcePath}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "firewall-cleanup.ps1"; DestDir: "{app}"; Flags: ignoreversion
 

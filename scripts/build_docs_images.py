@@ -331,7 +331,7 @@ def build_hero():
     text(draw, (86, 550), "传统遥控器  /  纯黑触摸板", 28)
     draw.rounded_rectangle((82, 640, 664, 705), 16, fill="#263146")
     text(draw, (106, 655), "同一局域网 · 首次配对 · 后续自动重连", 25, CYAN)
-    text(draw, (85, 773), "v0.4.1  ·  Windows + Android", 24, MUTED)
+    text(draw, (85, 773), "v0.4.2  ·  Windows + Android", 24, MUTED)
     phone(image, RAW / "mobile-touchpad.png", 900, 145, 245)
     phone(image, RAW / "mobile-remote.png", 1220, 85, 265)
     text(draw, (925, 714), "纯黑手势区域", 24, MUTED)

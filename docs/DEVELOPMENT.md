@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
 
-本页面向维护者。当前项目版本为 **0.4.1**，安卓 `versionCode` 为 **5**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+本页面向维护者。当前项目版本为 **0.4.2**，安卓 `versionCode` 为 **6**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
 
 ## 项目结构
 
@@ -117,18 +117,20 @@ Python 便携构建、Gradle debug 和 release 构建均使用同一签名，并
 node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/smoke_gui.py
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
-.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.0
+.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.1
 .\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-debug.apk
 ```
 
-升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。当前升级冒烟脚本断言的版本为 0.4.0 → 0.4.1；后续发版时同步更新基线和版本断言。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离的连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令，不代表安卓实机测试。
+
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.4.1 → 0.4.2 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
 
 | 已验证范围 | 当前证据 |
 | --- | --- |
 | 播放控制 | 真实无头 Edge / Chrome、本地媒体夹具，覆盖暂停、进度、音量、临时倍速及恢复 |
 | 配对与连接 | PIN、保存凭据重连、广播、IP 改变和手势测试 |
 | 桌面反馈 | GUI 冒烟、浮层不抢焦点及操作记录 |
-| Windows 覆盖 | 独立身份的实际 0.4.0 → 0.4.1 安装、重连、保留数据、自启、同版本修复、拒绝降级及干净卸载 |
+| Windows 覆盖 | 独立身份的实际安装、重连、保留数据、自启、同版本修复、拒绝降级及干净卸载 |
 | Android 更新包 | 旧新 APK 包名、证书和版本代码一致性检查 |
 | 仍待补充 | 实体安卓 WiFi、多品牌系统、真实触摸、实体手机覆盖安装及各版哔哩哔哩客户端兼容 |
 

@@ -8,12 +8,13 @@
   <header><div><p class="eyebrow">BILI REMOTE</p><p id="deviceStatus"><span id="onlineDot"></span><span id="deviceName">正在连接电脑</span></p></div><button id="openSettings" class="icon-button" aria-label="连接与设置">⚙</button></header>
   <section class="remote-heading"><p class="eyebrow">让播放，随手掌控</p><h1>我的遥控器</h1><p id="remoteMessage">同一 WiFi，打开即连接</p></section>
   <section class="playback-disc" aria-label="播放控制">
+    <button class="disc-control volume-up" data-command="volume" data-delta="0.05" aria-label="音量增大"><span class="volume-symbol" aria-hidden="true">+</span><span>音量加</span></button>
     <button class="seek left" data-command="seek" data-delta="-10" aria-label="快退 10 秒"><svg viewBox="0 0 32 32"><path d="M14 8 4 16l10 8V8Zm13 0-10 8 10 8V8Z"/></svg><span>10 秒</span></button>
     <button id="playButton" class="play-button" data-command="toggle" aria-label="播放或暂停"><svg id="playSymbol" viewBox="0 0 40 40"><path d="M12 7 32 20 12 33Z"/></svg></button>
     <button class="seek right" data-command="seek" data-delta="10" aria-label="快进 10 秒"><svg viewBox="0 0 32 32"><path d="m5 8 10 8-10 8V8Zm13 0 10 8-10 8V8Z"/></svg><span>10 秒</span></button>
-    <span class="disc-caption">播放 / 暂停</span>
+    <button class="disc-control volume-down" data-command="volume" data-delta="-0.05" aria-label="音量减小"><span class="volume-symbol" aria-hidden="true">−</span><span>音量减</span></button>
   </section>
-  <section class="volume-control"><button data-command="volume" data-delta="-0.05" aria-label="音量减小">−</button><div><svg viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3Z"/><path d="M16 8c3 2 3 6 0 8m3-11c5 4 5 10 0 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="volumeText">音量</span></div><button data-command="volume" data-delta="0.05" aria-label="音量增大">+</button></section>
+  <div class="playback-status"><span>播放 / 暂停</span><span aria-hidden="true">·</span><span id="volumeText" aria-live="polite">音量</span></div>
   <button id="holdSpeed" class="hold-speed"><span id="holdRate">2×</span><span>按住倍速 <small>松手恢复原速度</small></span></button>
   <button id="launchBrowser" class="launch-browser">打开电脑上的哔哩哔哩 <span>↗</span></button>
   <footer><button class="style-tab selected" data-style="remote">遥控器</button><button class="style-tab" data-style="touchpad">触摸板</button></footer>

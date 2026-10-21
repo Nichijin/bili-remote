@@ -13,6 +13,7 @@ def main():
         "--workpath", str(ROOT / ".tooling/pyinstaller"), "--specpath", str(ROOT / ".tooling"),
         "--add-data", str(ROOT / "android/app/src/main/assets") + ";android/app/src/main/assets", "--add-data", str(ROOT / "README.md") + ";.",
         "--add-data", str(ROOT / "docs") + ";docs",
+        "--add-data", str(ROOT / "CHANGELOG.md") + ";.",
         "--add-data", str(ROOT / "desktop/assets/bili-remote.ico") + ";desktop/assets",
         "--add-data", str(ROOT / "desktop/assets/player.js") + ";desktop/assets",
         "--hidden-import", "winrt.windows.foundation.collections", "--hidden-import", "winrt.windows.media",
