@@ -1,0 +1,39 @@
+plugins { id 'com.android.application' }
+
+// All build paths must retain the certificate of previously installed APKs.
+def stableKey = rootProject.file('signing/app.keystore')
+def expectedCertificate = rootProject.file('signing/certificate.sha256').text.trim().toLowerCase()
+if (!stableKey.isFile()) {
+    throw new GradleException('缺少原签名 signing/app.keystore。请恢复备份或先运行 scripts/build_apk.py 迁移旧密钥；不要生成新密钥。')
+}
+def keyStore = java.security.KeyStore.getInstance(stableKey, 'android'.toCharArray())
+def certificate = keyStore.getCertificate('androiddebugkey')
+def actualCertificate = certificate == null ? '' : java.security.MessageDigest.getInstance('SHA-256').digest(certificate.encoded).encodeHex().toString()
+if (actualCertificate != expectedCertificate) {
+    throw new GradleException('签名证书与已发布 APK 不一致，不能构建覆盖更新包。')
+}
+
+android {
+    namespace 'com.biliremote.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.biliremote.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 5
+        versionName '0.4.1'
+    }
+    signingConfigs {
+        stable {
+            storeFile stableKey
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.stable }
+        release { signingConfig signingConfigs.stable }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

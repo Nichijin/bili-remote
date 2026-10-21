@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" fill="none">
+  <title>哔哩哔哩手势遥控 · 安卓端</title>
+  <desc>深色触控手机，粉色边框与白色播放符号，青色无线信号。</desc>
+  <rect x="18" y="18" width="72" height="72" rx="16" fill="#191D2B"/>
+  <path d="M68,51 L68,74 C68,77.866 64.866,81 61,81 L42,81 C38.134,81 35,77.866 35,74 L35,34 C35,30.134 38.134,27 42,27 L56,27" stroke="#FB7299" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M47,71 L57,71" stroke="#FB7299" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64,25 C73.941,25 82,33.059 82,43" stroke="#75E1EB" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64,33 C69.523,33 74,37.477 74,43" stroke="#75E1EB" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M45,44 L45,61 L59,52.5 Z" fill="white"/>
+  <path d="M66.3,43 A2.3,2.3 0,1 1,61.7,43 A2.3,2.3 0,1 1,66.3,43 Z" fill="#75E1EB"/>
+</svg>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#000000"><title>哔哩哔哩遥控器</title><link rel="stylesheet" href="app.css"></head>
+<body>
+<main id="pad" aria-label="触摸板：轻点播放，滑动调节，长按倍速"></main>
+<main id="remote" hidden>
+  <header><div><p class="eyebrow">BILI REMOTE</p><p id="deviceStatus"><span id="onlineDot"></span><span id="deviceName">正在连接电脑</span></p></div><button id="openSettings" class="icon-button" aria-label="连接与设置">⚙</button></header>
+  <section class="remote-heading"><p class="eyebrow">让播放，随手掌控</p><h1>我的遥控器</h1><p id="remoteMessage">同一 WiFi，打开即连接</p></section>
+  <section class="playback-disc" aria-label="播放控制">
+    <button class="seek left" data-command="seek" data-delta="-10" aria-label="快退 10 秒"><svg viewBox="0 0 32 32"><path d="M14 8 4 16l10 8V8Zm13 0-10 8 10 8V8Z"/></svg><span>10 秒</span></button>
+    <button id="playButton" class="play-button" data-command="toggle" aria-label="播放或暂停"><svg id="playSymbol" viewBox="0 0 40 40"><path d="M12 7 32 20 12 33Z"/></svg></button>
+    <button class="seek right" data-command="seek" data-delta="10" aria-label="快进 10 秒"><svg viewBox="0 0 32 32"><path d="m5 8 10 8-10 8V8Zm13 0 10 8-10 8V8Z"/></svg><span>10 秒</span></button>
+    <span class="disc-caption">播放 / 暂停</span>
+  </section>
+  <section class="volume-control"><button data-command="volume" data-delta="-0.05" aria-label="音量减小">−</button><div><svg viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3Z"/><path d="M16 8c3 2 3 6 0 8m3-11c5 4 5 10 0 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span id="volumeText">音量</span></div><button data-command="volume" data-delta="0.05" aria-label="音量增大">+</button></section>
+  <button id="holdSpeed" class="hold-speed"><span id="holdRate">2×</span><span>按住倍速 <small>松手恢复原速度</small></span></button>
+  <button id="launchBrowser" class="launch-browser">打开电脑上的哔哩哔哩 <span>↗</span></button>
+  <footer><button class="style-tab selected" data-style="remote">遥控器</button><button class="style-tab" data-style="touchpad">触摸板</button></footer>
+</main>
+<div id="hud" role="status"></div>
+<dialog id="settings"><form id="settingsForm">
+  <div class="dialog-heading"><div><p class="eyebrow">连接与设置</p><h2>找到你的电脑</h2></div><button type="button" id="closeSettings" class="icon-button" aria-label="关闭设置">×</button></div>
+  <p class="description">电脑打开配套软件，手机连接同一 WiFi。首次输入配对码，以后自动连接。</p>
+  <label>在线电脑<select id="computer"><option value="">正在扫描电脑信号…</option></select></label><button type="button" id="search" class="secondary">重新扫描</button>
+  <details id="manualDetails"><summary>手动输入 IP / 连接记录</summary><label>电脑地址<input id="host" placeholder="192.168.1.10 或 10.0.2.2:8765" autocapitalize="off" spellcheck="false"></label><button type="button" id="connectManual" class="secondary">连接并保存地址</button><div id="history"></div></details>
+  <div class="setting-divider"></div>
+  <label>遥控器样式<select id="style"><option value="touchpad">触摸板 · 纯黑手势区域</option><option value="remote">传统遥控器 · 按键控制</option></select></label>
+  <label>播放目标<select id="target"><option value="auto">自动选择</option><option value="browser">网页播放窗口</option><option value="native">Windows 客户端</option></select></label>
+  <div id="nativeSettings" hidden><label>媒体会话<select id="session"><option value="">自动识别哔哩哔哩</option></select></label><button type="button" id="discover" class="secondary">检测客户端</button></div>
+  <label>长按倍速<select id="rate"><option value="1.5">1.5 倍</option><option value="2">2 倍</option><option value="3">3 倍</option><option value="4">4 倍</option></select></label>
+  <p id="connectionStatus" class="description">正在连接电脑…</p><button type="submit" class="primary">开始遥控</button>
+  <p class="description">触摸板：轻点播放 / 暂停，上下滑音量，左右滑进度，长按倍速。双指触摸或返回键可打开设置。</p>
+</form></dialog>
+<dialog id="pairing"><form id="pairingForm"><p class="eyebrow">只需配对一次</p><h2>连接这台电脑</h2><p id="pairingComputer" class="description"></p><label for="pairingCode">输入电脑显示的 6 位配对码</label><input id="pairingCode" class="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><p id="pairingMessage" class="description">配对成功后，下次打开自动连接。</p><button type="submit" class="primary">配对并连接</button><button type="button" id="cancelPairing" class="text-button">选择其他电脑</button></form></dialog>
+<script src="gestures.js"></script><script src="connection.js"></script><script src="remote.js"></script><script src="app.js"></script>
+</body></html>
