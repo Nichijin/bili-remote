@@ -103,7 +103,10 @@ def main():
         compiled = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if compiled.returncode:
             raise RuntimeError(compiled.stdout + compiled.stderr)
-        return output / "BiliRemote-Setup.exe"
+        # Baselines may use either the old fixed name or the new versioned name.
+        installers = list(output.glob("BiliRemote-Setup*.exe"))
+        assert len(installers) == 1, installers
+        return installers[0]
 
     def install(setup, name, *extra, success=True):
         return run(setup, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",

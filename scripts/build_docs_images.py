@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs/images"
 RAW = ROOT / ".tooling/docs-captures"
 sys.path.insert(0, str(ROOT))
+from scripts.release_files import release_paths
 
 INK, MUTED, PINK, CYAN = "#F3F5FC", "#A3AEC3", "#FB7299", "#75E1EB"
 NAVY, CARD, LINE = "#101521", "#1B2233", "#323D54"
@@ -323,7 +324,7 @@ def build_desktop_panels():
 
 def build_upgrade():
     image, draw = canvas(1440, 590, "升级时，直接安装新版", "覆盖安装保留数据；先卸载再安装会清除原来的配对和设置")
-    for x, label, first, second in [(60, "Windows", "运行新版 BiliRemote-Setup.exe", "原目录覆盖；原本运行时自动恢复到托盘"),
+    for x, label, first, second in [(60, "Windows", "运行新版 " + release_paths(ROOT)["installer"].name, "原目录覆盖；原本运行时自动恢复到托盘"),
                                    (750, "Android", "打开新版 APK，确认系统的“更新”", "同包名、同签名、递增版本代码")]:
         draw.rounded_rectangle((x, 195, x + 630, 425), 25, fill=CARD, outline=LINE, width=2)
         text(draw, (x + 30, 216), label, 31, PINK, True)

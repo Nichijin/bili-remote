@@ -88,7 +88,9 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliGestureRemote`。
 
 若使用本项目本地工具缓存中的编译器，可省略 `--compiler`。脚本默认检查 `.tooling/inno/ISCC.exe`，不会自动安装 Inno Setup。编译前确认使用场景符合构建工具的许可。
 
-构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup.exe`。普通用户分发安装器即可。
+构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.4.5.exe`。普通用户分发安装器即可。
+
+分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.4.5 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
 
 安装器固定 AppId，沿用实际旧安装路径，正常退出运行中的程序后替换文件。升级不调用旧卸载器，避免清空数据。保留实际自启和桌面快捷方式状态，原本运行的实例安装后恢复到托盘。支持同版本修复，拒绝较低版本降级。
 
@@ -102,7 +104,7 @@ Android Studio 可以打开 `android/`；Windows 也可使用便携构建脚本�
 .\.venv\Scripts\python.exe scripts/build_apk.py
 ```
 
-脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-debug.apk`。无需安装到全局工具路径。
+脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.4.5.apk`。无需安装到全局工具路径。
 
 **从新克隆的仓库不能直接生成可覆盖现有用户版本的 APK。** 维护者必须先把原签名恢复到 `android/signing/app.keystore`。该私钥不在仓库中；旧项目若仍有 `.tooling/debug.keystore`，脚本会核对证书后复制原密钥。密钥缺失或不匹配时停止，不会静默生成不同身份。
 
@@ -118,7 +120,7 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/smoke_gui.py
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
 .\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.4.4
-.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-debug.apk
+.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.4.5.apk
 ```
 
 遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动调用次数与开关持久化，不代表安卓实机震动测试。
@@ -146,7 +148,9 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/package_kit.py
 ```
 
-产物是 `dist/bili-remote-kit.zip` 与 `dist/SHA256.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+产物是 `dist/bili-remote-kit-0.4.5.zip` 与 `dist/SHA256-0.4.5.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+
+整合脚本只接收当前版本的两端安装包；缺少任一文件即停止，不会回退到无版本号文件或把旧版本混入新整合包。修改项目版本后会生成新的文件名，旧版带版本号的产物不会被覆盖。
 
 电脑程序和 Windows 安装器同时打包 `docs/`，让安装后的说明可以访问本地配图。更新文档后重新构建才会更新本地安装包，GitHub 文档更新不会自动替换用户电脑中的文件。
 

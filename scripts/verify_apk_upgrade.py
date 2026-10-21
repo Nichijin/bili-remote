@@ -3,9 +3,12 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from scripts.release_files import release_paths
 
 
 def apk_identity(path):
@@ -36,7 +39,7 @@ def verify(previous, candidate):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("previous", type=Path)
-    parser.add_argument("candidate", type=Path, nargs="?", default=ROOT / "dist/bili-remote-debug.apk")
+    parser.add_argument("candidate", type=Path, nargs="?", default=release_paths(ROOT)["apk"])
     arguments = parser.parse_args()
     previous, candidate = apk_identity(arguments.previous.resolve()), apk_identity(arguments.candidate.resolve())
     verify(previous, candidate)

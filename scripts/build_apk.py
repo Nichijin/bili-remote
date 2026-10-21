@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -16,6 +17,8 @@ from pathlib import Path
 from android_signing import ALIAS, PASSWORD, prepare_keystore
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from scripts.release_files import release_paths
 TOOLS = ROOT / ".tooling"
 BUILD = TOOLS / "apk-build"
 DIST = ROOT / "dist"
@@ -75,6 +78,7 @@ def command(arguments, environment=None, cwd=None):
 
 
 def main():
+    output = release_paths(ROOT)["apk"]
     if os.name != "nt":
         raise RuntimeError("此便携构建脚本针对 Windows；其他系统请用 Android Studio")
     TOOLS.mkdir(exist_ok=True)
@@ -98,7 +102,7 @@ def main():
     sources = list((ROOT / "android/app/src/main/java").rglob("*.java"))
     command([java_home / "bin/javac.exe", "-encoding", "UTF-8", "-source", "8", "-target", "8", "-bootclasspath", platform, "-d", classes, *sources])
     command([java_home / "bin/java.exe", "-cp", build_tools / "lib/d8.jar", "com.android.tools.r8.D8", "--lib", platform, "--min-api", "26", "--output", dex, *classes.rglob("*.class")])
-    base, aligned, output = BUILD / "unaligned.apk", BUILD / "aligned.apk", DIST / "bili-remote-debug.apk"
+    base, aligned = BUILD / "unaligned.apk", BUILD / "aligned.apk"
     # aapt2/zipalign on Windows may not handle non-ASCII argument paths.
     # Relative arguments also work when this project lives in a Chinese directory.
     shutil.copytree(ROOT / "android/app/src/main/assets", BUILD / "assets", dirs_exist_ok=True)

@@ -36,4 +36,7 @@ android {
         release { signingConfig signingConfigs.stable }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    applicationVariants.all { variant ->
+        variant.outputs.all { outputFileName = "bili-remote-${variant.versionName}.apk" }
+    }
 }

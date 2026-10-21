@@ -10,8 +10,8 @@
 
 | 安装到哪里 | 文件 | 系统要求 |
 | --- | --- | --- |
-| 电脑 | `BiliRemote-Setup.exe` | Windows 10 1809 或更新，64 位 |
-| 手机 | `bili-remote-debug.apk` | Android 8 或更新 |
+| 电脑 | `BiliRemote-Setup-0.4.5.exe` | Windows 10 1809 或更新，64 位 |
+| 手机 | `bili-remote-0.4.5.apk` | Android 8 或更新 |
 
 向维护者获取安装文件，或参考[开发说明](DEVELOPMENT.md)自行构建。GitHub 的 **Code → Download ZIP** 下载的是源码，不能当作安装包直接运行。文件名中的 `debug` 表示目前使用开发签名，手机仍可直接安装该 APK。
 

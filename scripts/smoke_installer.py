@@ -14,6 +14,8 @@ from pathlib import Path
 import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from scripts.release_files import release_paths
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APPROVAL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 
@@ -55,7 +57,7 @@ def main():
         result = subprocess.run([str(compiler), "/Q", "/DAppIdentity=" + identity, "/DAppIdentifier={{" + identifier + "}", "/DAppLabel=" + label, "/DUserDataPath=" + str(data_dir), "/DOutputPath=" + str(output), str(ROOT / "installer/BiliRemote.iss")], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
-        setup = output / "BiliRemote-Setup.exe"
+        setup = output / release_paths(ROOT)["installer"].name
         subprocess.run([str(setup), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=" + str(app_dir), "/TASKS=", "/LOG=" + str(folder / "install.log")], check=True, env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
         exe, uninstaller = app_dir / "BiliRemote-Desktop.exe", app_dir / "unins000.exe"
         uninstall_key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{" + identifier + "}_is1"
