@@ -220,6 +220,12 @@ def capture_desktop():
             tabs = next(widget for frame in app.window.winfo_children() for widget in frame.winfo_children() if isinstance(widget, ttk.Notebook))
             tabs.select(3)
             capture_window(app.window, RAW / "desktop-settings.png")
+            app.window.geometry("760x900+30+30")
+            app.window.update()
+            page = app.options_page
+            page.canvas.yview_moveto(app.feedback_frame.winfo_y() / max(1, page.content.winfo_height()))
+            app.window.update()
+            capture_window(app.window, RAW / "desktop-feedback.png")
         finally:
             app.window.destroy()
 
@@ -323,6 +329,14 @@ def build_desktop_panels():
         draw.rounded_rectangle((x - 8, y - 8, x + raw.width + 8, y + raw.height + 8), 14, fill=LINE)
         image.paste(raw, (x, y))
         image.save(OUTPUT / (stem + ".png"), optimize=True)
+
+    image, draw = canvas(1120, 1240, "电脑提示字幕：位置与外观", "真实设置页渲染 · 开关、位置、字号、颜色和不透明度自动保存")
+    raw = Image.open(RAW / "desktop-feedback.png").convert("RGB")
+    raw.thumbnail((920, 990), Image.Resampling.LANCZOS)
+    x, y = (1120 - raw.width) // 2, 190
+    draw.rounded_rectangle((x - 8, y - 8, x + raw.width + 8, y + raw.height + 8), 14, fill=LINE)
+    image.paste(raw, (x, y))
+    image.save(OUTPUT / "desktop-feedback.png", optimize=True)
 
 
 def build_upgrade():

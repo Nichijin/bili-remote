@@ -12,13 +12,13 @@ import time
 import tkinter as tk
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 from websockets.asyncio.server import serve
 
 from .detection import ClientDetector, combine
 from .discovery import start_discovery
-from .feedback import OperationOverlay
+from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
 from .layout import FlowRow, ScrollablePage, check_option, enable_dpi_awareness, fit_window, wrapped_label
 from .pairing import PairingCode
 from .server import Relay
@@ -42,6 +42,10 @@ class Companion:
         self.closing = self.request_stop = False
         self.preferences = Preferences(preferences_path or (Path(trust_path).with_name("settings.json") if trust_path else None))
         self.detector = ClientDetector()
+        self.inventory_visible = threading.Event()
+        self.inventory_signature = None
+        self.feedback_save_timer = None
+        self.feedback_style = normalize_style(self.preferences.values.get("feedback_style"))
         self.pairing = PairingCode()
         self.tray = self.overlay = None
         self.last_overlay_time = 0
@@ -49,7 +53,6 @@ class Companion:
         if not hidden:
             try:
                 self.tray = NativeTray(self.window, lambda kind: self.events.put((kind, None)))
-                self.overlay = OperationOverlay(self.window)
             except OSError as exc:
                 logging.warning("桌面提示或托盘不可用：%s", exc)
         self.window.protocol("WM_DELETE_WINDOW", self.on_close_window)
@@ -68,6 +71,10 @@ class Companion:
         for widget, name in ((remote_page, "连接与播放"), (detection, "客户端与版本"), (records, "操作记录"), (options_page, "设置")):
             tabs.add(widget, text=name)
         self.tabs = tabs
+        self.detection_page = detection
+        tabs.bind("<<NotebookTabChanged>>", self.update_inventory_visibility)
+        self.window.bind("<Map>", self.update_inventory_visibility, add=True)
+        self.window.bind("<Unmap>", self.update_inventory_visibility, add=True)
         self.remote_page = ScrollablePage(remote_page, padding=round(14 * self.ui_scale))
         self.options_page = ScrollablePage(options_page, padding=round(14 * self.ui_scale))
         remote, options = self.remote_page.content, self.options_page.content
@@ -110,7 +117,7 @@ class Companion:
             bar = ttk.Scrollbar(inventory_frame, orient=orient, command=command)
             bar.grid(row=row, column=column, sticky=sticky)
             self.inventory.configure(**{("y" if orient == "vertical" else "x") + "scrollcommand": bar.set})
-        self.inventory_status = tk.StringVar(value="正在检测…")
+        self.inventory_status = tk.StringVar(value="打开本页时检测，后台不持续读取客户端接口。")
         wrapped_label(detection, textvariable=self.inventory_status, foreground="#666666").pack(anchor="w", before=inventory_frame)
         ttk.Button(detection, text="重新检测", command=self.refresh_detection).pack(anchor="w", pady=10, before=inventory_frame)
         records_frame = ttk.Frame(records)
@@ -128,7 +135,8 @@ class Companion:
         self.close_to_tray = tk.BooleanVar(value=self.preferences.values.get("close_to_tray", True))
         check_option(options, "关闭窗口时保留在系统托盘运行", self.close_to_tray, lambda: self.save_preference("close_to_tray", self.close_to_tray.get()))
         self.show_feedback = tk.BooleanVar(value=self.preferences.values.get("show_feedback", True))
-        check_option(options, "遥控操作时显示桌面提示", self.show_feedback, lambda: self.save_preference("show_feedback", self.show_feedback.get()))
+        check_option(options, "开启遥控提示字幕", self.show_feedback, self.change_feedback_enabled)
+        self.build_feedback_settings(options)
         wrapped_label(options, text="电脑在线时会广播供手机发现。配对过的手机不再需要输入配对码。\n双击托盘图标打开，右键可完全退出。", foreground="#666666").pack(anchor="w", pady=16)
         self.options_status = tk.StringVar()
         wrapped_label(options, textvariable=self.options_status).pack(anchor="w", pady=8)
@@ -139,6 +147,130 @@ class Companion:
     def refresh_pin_label(self):
         code = self.pairing.current()
         self.pin_text.set(code[:3] + " " + code[3:])
+
+    def build_feedback_settings(self, parent):
+        frame = ttk.LabelFrame(parent, text="提示字幕样式", padding=12)
+        self.feedback_frame = frame
+        frame.pack(fill="x", pady=(0, 12))
+        self.feedback_controls = []
+        self.feedback_vars = {key: (tk.StringVar if key == "color" else tk.IntVar if key == "font_size" else tk.DoubleVar)(value=value) for key, value in self.feedback_style.items()}
+        self.feedback_readouts = {}
+        self.feedback_positions = {"左上": (5, 5), "上方居中": (50, 5), "右上": (95, 5),
+                                   "左侧居中": (5, 50), "屏幕中央": (50, 50), "右侧居中": (95, 50),
+                                   "左下": (5, 88), "下方居中": (50, 88), "右下": (95, 88)}
+        self.feedback_position = tk.StringVar(value="自定义")
+        row = FlowRow(frame); row.pack(fill="x", pady=3)
+        row.add(ttk.Label(row, text="位置预设"))
+        preset = row.add(ttk.Combobox(row, textvariable=self.feedback_position, values=[*self.feedback_positions, "自定义"], state="readonly", width=12))
+        preset.bind("<<ComboboxSelected>>", self.choose_feedback_position)
+        self.feedback_controls.append(preset)
+        for key in ("x", "y", "opacity"):
+            line = ttk.Frame(frame); line.pack(fill="x", pady=7)
+            caption = tk.StringVar(); self.feedback_readouts[key] = caption
+            ttk.Label(line, textvariable=caption).pack(anchor="w")
+            control = ttk.Scale(line, from_=10 if key == "opacity" else 0, to=100, variable=self.feedback_vars[key])
+            control.pack(fill="x", pady=(5, 0)); self.feedback_controls.append(control)
+        row = FlowRow(frame); row.pack(fill="x", pady=4)
+        row.add(ttk.Label(row, text="字号（10–64 pt）"))
+        control = row.add(ttk.Spinbox(row, from_=10, to=64, increment=1, width=6, textvariable=self.feedback_vars["font_size"]))
+        control.bind("<FocusOut>", self.finish_feedback_edit)
+        control.bind("<Return>", self.finish_feedback_edit)
+        self.feedback_controls.append(control)
+        row = FlowRow(frame); row.pack(fill="x", pady=4)
+        row.add(ttk.Label(row, text="文字颜色"))
+        color = row.add(ttk.Entry(row, textvariable=self.feedback_vars["color"], width=10))
+        color.bind("<FocusOut>", self.finish_feedback_edit)
+        color.bind("<Return>", self.finish_feedback_edit)
+        chooser = row.add(ttk.Button(row, text="选择颜色", command=self.choose_feedback_color))
+        self.feedback_controls.extend([color, chooser])
+        wrapped_label(frame, text="水平 0% 为左侧、100% 为右侧；垂直 0% 为顶部、100% 为底部。不透明度越小越透明，同时作用于文字和底色。字幕显示在电脑主窗口所在屏幕的工作区内。", foreground="#666666").pack(anchor="w", pady=7)
+        actions = FlowRow(frame); actions.pack(fill="x")
+        self.feedback_controls.append(actions.add(ttk.Button(actions, text="预览提示字幕", command=self.preview_feedback)))
+        self.feedback_controls.append(actions.add(ttk.Button(actions, text="恢复默认样式", command=self.reset_feedback_style)))
+        for variable in self.feedback_vars.values():
+            variable.trace_add("write", self.feedback_style_edited)
+        self.update_feedback_labels()
+        self.set_feedback_controls_state()
+
+    def update_feedback_labels(self):
+        for key, caption in self.feedback_readouts.items():
+            value = self.feedback_style[key]
+            caption.set(f"{'水平位置' if key == 'x' else '垂直位置' if key == 'y' else '不透明度'}  {value}%")
+        pair = self.feedback_style["x"], self.feedback_style["y"]
+        self.feedback_position.set(next((name for name, position in self.feedback_positions.items() if position == pair), "自定义"))
+
+    def feedback_style_edited(self, *args):
+        values = dict(self.feedback_style)
+        for key, variable in self.feedback_vars.items():
+            try:
+                values[key] = variable.get()
+            except tk.TclError:
+                return  # A partially typed size is not a complete setting yet.
+        normalized = normalize_style(values)
+        if normalized["color"] != str(values["color"]).upper():
+            return  # Preserve the last valid color while the hex field is typed.
+        self.feedback_style = normalized
+        self.update_feedback_labels()
+        if self.overlay:
+            self.overlay.set_style(self.feedback_style)
+        if self.feedback_save_timer:
+            self.window.after_cancel(self.feedback_save_timer)
+        self.feedback_save_timer = self.window.after(250, self.flush_feedback_style)
+
+    def flush_feedback_style(self):
+        if self.feedback_save_timer:
+            self.window.after_cancel(self.feedback_save_timer)
+            self.feedback_save_timer = None
+        self.save_preference("feedback_style", self.feedback_style)
+
+    def finish_feedback_edit(self, event=None):
+        self.feedback_style_edited()
+        for key in ("font_size", "color"):
+            self.feedback_vars[key].set(self.feedback_style[key])
+        self.flush_feedback_style()
+
+    def choose_feedback_position(self, event=None):
+        position = self.feedback_positions.get(self.feedback_position.get())
+        if position:
+            self.feedback_vars["x"].set(position[0]); self.feedback_vars["y"].set(position[1])
+
+    def choose_feedback_color(self):
+        color = colorchooser.askcolor(color=self.feedback_style["color"], title="提示字幕颜色", parent=self.window)[1]
+        if color:
+            self.feedback_vars["color"].set(color)
+
+    def reset_feedback_style(self):
+        for key, value in DEFAULT_STYLE.items():
+            self.feedback_vars[key].set(value)
+        self.flush_feedback_style()
+
+    def set_feedback_controls_state(self):
+        for widget in self.feedback_controls:
+            widget.state(["!disabled"] if self.show_feedback.get() else ["disabled"])
+
+    def change_feedback_enabled(self):
+        self.save_preference("show_feedback", self.show_feedback.get())
+        self.set_feedback_controls_state()
+        if not self.show_feedback.get() and self.overlay:
+            self.overlay.close(); self.overlay = None
+
+    def show_overlay(self, text, success=True):
+        if not self.show_feedback.get():
+            return
+        try:
+            if self.overlay is None:
+                self.overlay = OperationOverlay(self.window, self.feedback_style)
+            self.overlay.show(text, success)
+        except (OSError, tk.TclError) as exc:
+            logging.warning("提示字幕不可用：%s", exc)
+            if self.overlay:
+                with contextlib.suppress(tk.TclError):
+                    self.overlay.close()
+                self.overlay = None
+
+    def preview_feedback(self):
+        self.finish_feedback_edit()
+        self.show_overlay("提示字幕预览 · 临时 2 倍速")
 
     def refresh_pin(self):
         self.pairing.rotate()
@@ -165,6 +297,9 @@ class Companion:
     async def serve(self):
         self.loop = asyncio.get_running_loop()
         self.stop_event, self.detection_request = asyncio.Event(), asyncio.Event()
+        self.inventory_signature = None
+        if self.inventory_visible.is_set():
+            self.detection_request.set()
         if self.closing or self.request_stop:
             self.stop_event.set()
         self.relay = Relay(trust=TrustStore(self.trust_path), pairing=self.pairing, notify=lambda text: self.events.put(("status", text)), feedback=lambda event: self.events.put(("operation", event)))
@@ -192,6 +327,8 @@ class Companion:
 
     async def monitor_targets(self):
         while True:
+            if not self.inventory_visible.is_set() and not self.detection_request.is_set():
+                await self.detection_request.wait()
             force = self.detection_request.is_set()
             self.detection_request.clear()
             try:
@@ -202,7 +339,10 @@ class Companion:
                     sessions = []
                 browser = self.relay.browser
                 name = browser.executable.name.lower() if browser.running and browser.executable else ""
-                self.events.put(("inventory", combine(installed, running, sessions, name)))
+                rows = combine(installed, running, sessions, name)
+                if rows != self.inventory_signature:
+                    self.inventory_signature = rows
+                    self.events.put(("inventory", rows))
             except Exception as exc:
                 logging.warning("客户端检测失败：%s", exc)
             try:
@@ -215,6 +355,14 @@ class Companion:
         if self.loop and self.detection_request:
             self.loop.call_soon_threadsafe(self.detection_request.set)
 
+    def update_inventory_visibility(self, event=None):
+        visible = self.window.state() == "normal" and self.tabs.select() == str(self.detection_page)
+        if visible and not self.inventory_visible.is_set():
+            self.inventory_visible.set()
+            self.refresh_detection()
+        elif not visible:
+            self.inventory_visible.clear()
+
     def open_browser(self):
         if not self.loop or not self.relay:
             self.status.set("请先启动电脑服务")
@@ -223,7 +371,8 @@ class Companion:
             try:
                 await self.relay.browser.open()
                 self.events.put(("operation", {"ok": True, "text": "已打开遥控播放窗口，请选择视频", "cmd": "open_browser"}))
-                self.detection_request.set()
+                if self.inventory_visible.is_set():
+                    self.detection_request.set()
             except Exception as exc:
                 self.events.put(("operation", {"ok": False, "text": str(exc), "cmd": "open_browser"}))
         asyncio.run_coroutine_threadsafe(open_window(), self.loop)
@@ -246,8 +395,10 @@ class Companion:
         if not self.hidden:
             self.window.deiconify()
             self.window.lift()
+            self.update_inventory_visibility()
 
     def minimize(self):
+        self.inventory_visible.clear()
         if self.tray and self.tray.visible:
             self.window.withdraw()
         elif not self.hidden:
@@ -306,14 +457,14 @@ class Companion:
                 if self.records.size() > 100:
                     self.records.delete(100, "end")
                 now = time.monotonic()
-                if self.overlay and self.show_feedback.get() and (payload.get("cmd") not in {"volume", "seek_to"} or now - self.last_overlay_time > .15):
-                    self.overlay.show(text, payload["ok"])
+                if not self.hidden and self.show_feedback.get() and (payload.get("cmd") not in {"volume", "seek_to"} or now - self.last_overlay_time > .15):
+                    self.show_overlay(text, payload["ok"])
                     self.last_overlay_time = now
             elif kind == "inventory":
                 self.inventory.delete(*self.inventory.get_children())
                 for row in payload:
                     self.inventory.insert("", "end", text=row.get("installed_name", row["name"]), values=(row["version"], "运行中" if row["running"] else "已安装", row["capabilities"]))
-                self.inventory_status.set(f"检测到 {len(payload)} 个目标，每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
+                self.inventory_status.set(f"检测到 {len(payload)} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
             elif kind == "show":
                 self.show()
             elif kind == "quit":
@@ -332,6 +483,8 @@ class Companion:
         self.window.after(200, self.poll)
 
     def close(self):
+        if self.feedback_save_timer:
+            self.flush_feedback_style()
         self.closing = True
         self.stop()
 

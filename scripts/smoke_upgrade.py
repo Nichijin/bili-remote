@@ -149,7 +149,7 @@ def main():
         trust = TrustStore(data_dir / "trust.json")
         token = trust.allow("upgrade-test-phone", "upgrade test phone")
         trust_data = trust.data.copy()
-        settings = b'{"close_to_tray":false,"show_feedback":false,"future_setting":"retain"}'
+        settings = b'{"close_to_tray":false,"show_feedback":false,"feedback_style":{"x":25,"y":60,"font_size":24,"color":"#75E1EB","opacity":70},"future_setting":"retain"}'
         (data_dir / "settings.json").write_bytes(settings)
         cookie = data_dir / "browser-profile/Default/Cookies-test"
         cookie.parent.mkdir(parents=True)

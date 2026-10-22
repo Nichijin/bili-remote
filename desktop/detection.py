@@ -78,13 +78,21 @@ def installed_clients():
 
 def running_targets():
     result = {}
-    for process in psutil.process_iter(["name", "exe"]):
-        name, path = process.info["name"] or "", process.info["exe"] or ""
+    # Avoid querying/caching full executable paths for every unrelated process.
+    for process in psutil.process_iter(["name"]):
+        name = process.info["name"] or ""
         kind = "browser" if name.lower() in {"msedge.exe", "chrome.exe", "firefox.exe"} else "client" if is_client(name) else ""
         if not kind:
             continue
+        try:
+            path = process.exe() or ""
+        except psutil.Error:
+            path = ""
         if (kind, path or name) not in result:
             result[kind, path or name] = {"name": name, "version": file_version(path) if path else "未知", "kind": kind, "path": path, "running": True, "source": "运行中"}
+    clear_cache = getattr(psutil.process_iter, "cache_clear", None)
+    if clear_cache:
+        clear_cache()
     return list(result.values())
 
 
