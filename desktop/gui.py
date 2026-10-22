@@ -16,7 +16,7 @@ from tkinter import colorchooser, messagebox, ttk
 
 from websockets.asyncio.server import serve
 
-from .appearance import BLUE, LINE, MUTED, SIDEBAR, SURFACE, TEXT, Card, Columns, apply_theme, line_icon, preference_row, rounded_rect, tooltip
+from .appearance import BLUE, LINE, MUTED, SIDEBAR, SURFACE, TEXT, Card, Columns, apply_theme, line_icon, preference_row, tooltip
 from .detection import ClientDetector, combine
 from .discovery import start_discovery
 from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
@@ -24,6 +24,7 @@ from .layout import CachedPages, FlowRow, ScrollablePage, enable_dpi_awareness, 
 from .pairing import PairingCode
 from .server import Relay
 from .trust import TrustStore
+from .subtitle_preview import SubtitlePreview
 from .windows import NativeTray, Preferences, InstanceGuard, WINDOW_TITLE, data_directory, icon_path, installed_uninstaller, signal_existing, startup_enabled, set_startup
 
 
@@ -31,8 +32,9 @@ class Companion:
     def __init__(self, hidden=False, port=8765, discovery_port=8766, trust_path=None, background=False, preferences_path=None):
         enable_dpi_awareness()
         self.window = tk.Tk()
-        if hidden or background:
-            self.window.withdraw()
+        # Prepare real controls and geometry before exposing the main window.
+        # No partially constructed page is shown during cold startup.
+        self.window.withdraw()
         self.hidden, self.port, self.discovery_port, self.trust_path = hidden, port, discovery_port, trust_path
         self.window.title(WINDOW_TITLE)
         with contextlib.suppress(tk.TclError):
@@ -46,6 +48,8 @@ class Companion:
         self.inventory_visible = threading.Event()
         self.inventory_signature = None
         self.feedback_save_timer = None
+        self.feedback_editor = None
+        self.feedback_dragging = False
         self.feedback_style = normalize_style(self.preferences.values.get("feedback_style"))
         self.pairing = PairingCode()
         self.tray = self.overlay = None
@@ -61,6 +65,9 @@ class Companion:
         self.start()
         if background:
             self.minimize()
+        elif not hidden:
+            self.window.update_idletasks()
+            self.window.deiconify()
 
     def build_ui(self):
         self.font_family = apply_theme(self.window, self.ui_scale)
@@ -75,11 +82,9 @@ class Companion:
         ttk.Frame(self.shell, width=1, style="Sidebar.TFrame").pack(side="left", fill="y")
         self.brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
         self.brand.pack(fill="x", padx=self.px(18), pady=(self.px(30), self.px(34)))
-        logo = tk.Canvas(self.brand, width=self.px(36), height=self.px(36), background=SIDEBAR, highlightthickness=0)
+        self.brand_icon = line_icon(self.window, "remote", self.px(34), BLUE)
+        logo = ttk.Label(self.brand, image=self.brand_icon, style="Sidebar.TLabel")
         logo.pack(side="left")
-        rounded_rect(logo, 0, 0, self.px(36), self.px(36), self.px(10), fill=BLUE, outline="")
-        logo.create_line(*[self.px(v) for v in (10, 12, 26, 12, 26, 25, 10, 25, 10, 12)], fill="white", width=self.px(2), joinstyle="round")
-        logo.create_line(*[self.px(v) for v in (13, 7, 17, 11, 23, 7)], fill="white", width=self.px(2), joinstyle="round")
         self.brand_text = ttk.Frame(self.brand, style="Sidebar.TFrame")
         self.brand_text.pack(side="left", padx=(self.px(9), 0))
         ttk.Label(self.brand_text, text="Bili Remote", style="Sidebar.Brand.TLabel").pack(anchor="w")
@@ -115,6 +120,8 @@ class Companion:
         self.window.bind("<Configure>", self.resize_navigation, add=True)
         self.window.bind("<Map>", self.update_inventory_visibility, add=True)
         self.window.bind("<Unmap>", self.update_inventory_visibility, add=True)
+        self.window.bind("<Unmap>", lambda event: self.end_feedback_preview() if event.widget is self.window else None, add=True)
+        self.window.bind("<Escape>", lambda event: self.end_feedback_preview(), add=True)
         self.remote_page = ScrollablePage(remote_page, padding=self.px(26))
         self.options_page = ScrollablePage(options_page, padding=self.px(26))
         remote, options = self.remote_page.content, self.options_page.content
@@ -267,6 +274,8 @@ class Companion:
         current = self.tabs.index(self.tabs.select())
         if current == self.active_navigation:
             return
+        if current != 3:
+            self.end_feedback_preview()
         for index in {self.active_navigation, current} - {None}:
             button, name = self.navigation[index]
             selected = index == current
@@ -307,6 +316,13 @@ class Companion:
                                    "左侧居中": (5, 50), "屏幕中央": (50, 50), "右侧居中": (95, 50),
                                    "左下": (5, 88), "下方居中": (50, 88), "右下": (95, 88)}
         self.feedback_position = tk.StringVar(value="自定义")
+        self.subtitle_preview = SubtitlePreview(frame, self.ui_scale, self.drag_feedback_position)
+        self.subtitle_preview.pack(fill="x", pady=(0, self.px(18)))
+        preview_actions = FlowRow(frame, style="Surface.TFrame")
+        preview_actions.pack(fill="x", pady=(0, self.px(14)))
+        self.preview_button_text = tk.StringVar(value="在屏幕上拖动字幕")
+        self.feedback_controls.append(preview_actions.add(ttk.Button(preview_actions, textvariable=self.preview_button_text, command=self.preview_feedback)))
+        self.feedback_controls.append(preview_actions.add(ttk.Button(preview_actions, text="恢复默认", command=self.reset_feedback_style)))
         row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(3))
         row.add(ttk.Label(row, text="位置预设", style="Surface.TLabel"))
         preset = row.add(ttk.Combobox(row, textvariable=self.feedback_position, values=[*self.feedback_positions, "自定义"], state="readonly", width=12))
@@ -331,10 +347,7 @@ class Companion:
         color.bind("<Return>", self.finish_feedback_edit)
         chooser = row.add(ttk.Button(row, text="选择颜色", command=self.choose_feedback_color))
         self.feedback_controls.extend([color, chooser])
-        wrapped_label(frame, text="位置按屏幕工作区计算；不透明度同时作用于文字和底色。字幕显示在电脑主窗口所在的屏幕。", style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(12))
-        actions = FlowRow(frame, style="Surface.TFrame"); actions.pack(fill="x")
-        self.feedback_controls.append(actions.add(ttk.Button(actions, text="预览提示字幕", command=self.preview_feedback)))
-        self.feedback_controls.append(actions.add(ttk.Button(actions, text="恢复默认样式", command=self.reset_feedback_style)))
+        wrapped_label(frame, text="上方预览持续显示样式与位置；屏幕预览展示实际字号和透明度。拖动后自动保存，按 Esc 或离开设置结束屏幕预览。", style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(12))
         for variable in self.feedback_vars.values():
             variable.trace_add("write", self.feedback_style_edited)
         self.update_feedback_labels()
@@ -352,6 +365,8 @@ class Companion:
             self.feedback_position.set(position)
 
     def feedback_style_edited(self, *args):
+        if self.feedback_dragging:
+            return
         values = dict(self.feedback_style)
         for key, variable in self.feedback_vars.items():
             try:
@@ -367,6 +382,9 @@ class Companion:
         self.update_feedback_labels()
         if self.overlay:
             self.overlay.set_style(self.feedback_style)
+        if self.feedback_editor:
+            self.feedback_editor.set_style(self.feedback_style)
+        self.subtitle_preview.set_style(self.feedback_style, self.show_feedback.get())
         if self.feedback_save_timer:
             self.window.after_cancel(self.feedback_save_timer)
         self.feedback_save_timer = self.window.after(250, self.flush_feedback_style)
@@ -401,12 +419,15 @@ class Companion:
     def set_feedback_controls_state(self):
         for widget in self.feedback_controls:
             widget.state(["!disabled"] if self.show_feedback.get() else ["disabled"])
+        self.subtitle_preview.set_style(self.feedback_style, self.show_feedback.get())
 
     def change_feedback_enabled(self):
         self.save_preference("show_feedback", self.show_feedback.get())
         self.set_feedback_controls_state()
         if not self.show_feedback.get() and self.overlay:
             self.overlay.close(); self.overlay = None
+        if not self.show_feedback.get():
+            self.end_feedback_preview()
 
     def show_overlay(self, text, success=True):
         if not self.show_feedback.get():
@@ -424,7 +445,32 @@ class Companion:
 
     def preview_feedback(self):
         self.finish_feedback_edit()
-        self.show_overlay("提示字幕预览 · 临时 2 倍速")
+        if self.feedback_editor:
+            self.end_feedback_preview()
+        elif self.show_feedback.get():
+            try:
+                self.feedback_editor = OperationOverlay(self.window, self.feedback_style, self.drag_feedback_position)
+                self.feedback_editor.show("拖动调整位置 · 临时 2 倍速")
+                self.preview_button_text.set("结束屏幕预览")
+            except (OSError, tk.TclError) as exc:
+                self.end_feedback_preview()
+                self.options_status.set(f"屏幕预览不可用：{exc}")
+
+    def drag_feedback_position(self, x, y):
+        self.feedback_dragging = True
+        try:
+            self.feedback_vars["x"].set(x)
+            self.feedback_vars["y"].set(y)
+        finally:
+            self.feedback_dragging = False
+        self.feedback_style_edited()
+
+    def end_feedback_preview(self):
+        if self.feedback_editor:
+            self.feedback_editor.close()
+            self.feedback_editor = None
+        if hasattr(self, "preview_button_text"):
+            self.preview_button_text.set("在屏幕上拖动字幕")
 
     def refresh_pin(self):
         self.pairing.rotate()
@@ -464,7 +510,7 @@ class Companion:
             host = os.environ.get("BILI_REMOTE_BIND_HOST", "0.0.0.0")
             async with serve(self.relay.handle, host, self.port, process_request=self.relay.http, max_size=16_384, ping_interval=10, ping_timeout=5, close_timeout=2) as server:
                 discovery = await start_discovery(self.relay.trust.public_info(self.port), host=host, port=self.discovery_port)
-                self.events.put(("status", "电脑已在线，正在广播；等待手机连接。"))
+                self.events.put(("status", "电脑已在线 · 等待手机连接"))
                 addresses = sorted({r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET) if not r[4][0].startswith("127.")})
                 self.events.put(("addresses", socket.gethostname() + " · " + " / ".join(addresses)))
                 await self.stop_event.wait()
@@ -663,6 +709,7 @@ class Companion:
             self.last_overlay_time = now
 
     def close(self):
+        self.end_feedback_preview()
         if self.feedback_save_timer:
             self.flush_feedback_style()
         self.closing = True

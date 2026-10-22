@@ -25,10 +25,14 @@ def main():
     parser.add_argument("--profile", type=Path)
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--resize-steps", type=int, default=12)
+    parser.add_argument("--min-width", type=int, default=900)
+    parser.add_argument("--max-width", type=int, default=1230)
     parser.add_argument("--source-root", type=Path, default=ROOT)
     args = parser.parse_args()
     if not 1 <= args.rounds <= 30 or not 2 <= args.resize_steps <= 24:
         parser.error("rounds must be 1–30; resize-steps must be 2–24")
+    if not 440 <= args.min_width < args.max_width <= 3840:
+        parser.error("resize widths must satisfy 440 <= min-width < max-width <= 3840")
     sys.path.insert(0, str(args.source_root.resolve()))
     from desktop.gui import Companion
     class Preview(Companion):
@@ -95,7 +99,7 @@ def main():
             for step in [*range(args.resize_steps), *reversed(range(args.resize_steps))]:
                 started = time.perf_counter()
                 cpu_started = time.process_time()
-                width = round(900 + step * 330 / max(1, args.resize_steps - 1))
+                width = round(args.min_width + step * (args.max_width-args.min_width) / max(1, args.resize_steps - 1))
                 app.window.geometry(f"{width}x780")
                 app.window.update()
                 elapsed = (time.perf_counter() - started) * 1000
@@ -113,6 +117,7 @@ def main():
                       "switches": timings, **summary(samples), "first_settings_action": summary(first_action),
                       "transition_complete": summary(animation),
                       "native_page_surfaces": bool(getattr(getattr(app.tabs, "compositor", None), "surfaces", {})),
+                      "resize_width_range": [args.min_width, args.max_width],
                       "slider_drag": summary(drag), "window_resize": summary(resize), "resize_samples": resize_samples}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")

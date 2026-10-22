@@ -1,6 +1,6 @@
 import pytest
 
-from desktop.feedback import DEFAULT_STYLE, normalize_style, overlay_geometry
+from desktop.feedback import DEFAULT_STYLE, normalize_style, overlay_geometry, overlay_position
 
 
 @pytest.mark.parametrize("value", [None, [], "invalid", {"opacity": False, "font_size": float("nan"), "x": float("inf"), "color": "red"}])
@@ -22,3 +22,15 @@ def test_position_stays_in_selected_work_area_including_negative_monitors(work_a
         left, top, right, bottom = work_area
         assert left <= x <= x + width <= right
         assert top <= y <= y + height <= bottom
+
+
+@pytest.mark.parametrize("area", [(0, 0, 1920, 1040), (-1920, -200, 0, 840)])
+def test_dragging_preserves_saved_position_on_negative_and_positive_monitors(area):
+    for x, y in ((0, 0), (50, 88), (100, 100)):
+        width, height, left, top = overlay_geometry(area, (400, 80), x, y)
+        assert overlay_position(area, (width, height), left, top) == (x, y)
+    assert overlay_position(area, (400, 80), area[0]-5000, area[3]+5000) == (0, 100)
+
+
+def test_oversized_caption_drag_is_stable_when_no_movement_space_remains():
+    assert overlay_position((0, 0, 300, 200), (400, 500), 100, 150) == (50, 50)

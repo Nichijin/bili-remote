@@ -208,7 +208,7 @@ def capture_desktop():
             def start(self):
                 # Render the real widgets without network, real device discovery or data.
                 self.toggle.config(text="停止服务")
-                self.status.set("电脑已在线，正在广播；等待手机连接。")
+                self.status.set("电脑已在线 · 等待手机连接")
                 self.addresses.set("演示电脑 · 192.168.1.10")
 
             def refresh_pin_label(self):
@@ -344,7 +344,7 @@ def build_desktop_panels():
         image.paste(raw, (x, y))
         image.save(OUTPUT / (stem + ".png"), optimize=True)
 
-    image, draw = canvas(1120, 1240, "电脑提示字幕：位置与外观", "真实设置页渲染 · 开关、位置、字号、颜色和不透明度自动保存")
+    image, draw = canvas(1120, 1240, "电脑字幕：直接拖动，持续预览", "真实设置页渲染 · 页内拖动与屏幕编辑预览 · 修改自动保存")
     raw = Image.open(RAW / "desktop-feedback.png").convert("RGB")
     raw.thumbnail((920, 990), Image.Resampling.LANCZOS)
     x, y = (1120 - raw.width) // 2, 190

@@ -64,11 +64,20 @@ def main():
             point = wintypes.POINT(switch.winfo_rootx() + switch.winfo_width() // 2,
                                   switch.winfo_rooty() + switch.winfo_height() // 2)
             hit = user.WindowFromPoint(point)
-            assert hit == switch.winfo_id(), f"Fade intercepted input: {hit} != {switch.winfo_id()}"
-            user.SetCursorPos(point.x, point.y)
-            app.window.update()
-            user.mouse_event(2, 0, 0, 0, 0)
-            user.mouse_event(4, 0, 0, 0, 0)
+            name = ctypes.create_unicode_buffer(256)
+            user.GetClassNameW(wintypes.HWND(hit), name, 256)
+            desktop_locked = name.value.startswith("LockScreen")
+            if desktop_locked:
+                # A locked Windows session cannot route physical input to the
+                # app. Exercise Tk input but report native routing as untested.
+                switch.event_generate("<ButtonPress-1>", x=8, y=8)
+                switch.event_generate("<ButtonRelease-1>", x=8, y=8)
+            else:
+                assert hit == switch.winfo_id(), f"Fade intercepted input: {hit} != {switch.winfo_id()}"
+                user.SetCursorPos(point.x, point.y)
+                app.window.update()
+                user.mouse_event(2, 0, 0, 0, 0)
+                user.mouse_event(4, 0, 0, 0, 0)
             app.window.update()
             assert app.close_to_tray.get() != previous, "Immediate native click was ignored"
             assert app.tabs.transition_timer is not None, "Click only worked after animation ended"
@@ -100,7 +109,7 @@ def main():
             # events or layout work should be deferred until a menu is clicked.
             app.window.geometry("1120x780+30+30")
             app.window.update()
-            size = app.tabs.winfo_width(), app.tabs.winfo_height()
+            size = min(app.tabs.winfo_width(), app.tabs.max_page_width), app.tabs.winfo_height()
             assert all((page.winfo_width(), page.winfo_height()) == size for page in app.tabs.pages)
             configured = []
             for page in app.tabs.pages:
@@ -115,7 +124,8 @@ def main():
             assert not configured, "Navigation triggered a deferred layout"
             point = wintypes.POINT(switch.winfo_rootx() + switch.winfo_width() // 2,
                                   switch.winfo_rooty() + switch.winfo_height() // 2)
-            assert user.WindowFromPoint(point) == switch.winfo_id(), "Resizing broke native control input"
+            if not desktop_locked:
+                assert user.WindowFromPoint(point) == switch.winfo_id(), "Resizing broke native control input"
             app.tabs.select(0)
             app.window.withdraw()
             app.window.update()
@@ -130,7 +140,9 @@ def main():
             app.tabs.select(0)
             app.window.update()
             assert app.tabs.select() == str(app.tabs.pages[0]), "Fallback failed"
-            report = {"native_hit_test_and_click_during_fade": True, "rapid_switches": 120,
+            report = {"native_hit_test_and_click_during_fade": not desktop_locked,
+                      "native_input_limitation": "Windows session locked" if desktop_locked else None,
+                      "tk_input_during_fade": True, "rapid_switches": 120,
                       "cancelled_pages_opaque": True, "same_page_no_restart": True,
                       "controls_and_images_reused": True, "gdi_object_delta": gdi_delta,
                       "all_pages_prepared_after_resize": True, "navigation_configure_events": len(configured),

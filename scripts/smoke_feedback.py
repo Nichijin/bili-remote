@@ -36,7 +36,8 @@ def main():
             app.feedback_vars["color"].set("#75e1eb")
             app.feedback_vars["opacity"].set(65)
             app.feedback_position.set("右上"); app.choose_feedback_position()
-            app.preview_feedback(); app.window.update_idletasks()
+            app.finish_feedback_edit()
+            app.show_overlay("样式检查 · 临时 2 倍速"); app.window.update_idletasks()
             overlay = app.overlay
             assert overlay.style == {"font_size": 32, "color": "#75E1EB", "opacity": 65, "x": 95, "y": 5}
             assert overlay.label.cget("fg") == "#75E1EB"
@@ -55,7 +56,7 @@ def main():
             assert app.overlay is None and Preferences(path).values["show_feedback"] is False
             app.show_overlay("must remain disabled")
             assert app.overlay is None
-            app.show_feedback.set(True); app.change_feedback_enabled(); app.preview_feedback()
+            app.show_feedback.set(True); app.change_feedback_enabled(); app.show_overlay("重新开启")
             assert app.overlay and app.overlay is not overlay
             app.reset_feedback_style()
             assert app.overlay.style == DEFAULT_STYLE

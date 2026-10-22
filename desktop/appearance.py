@@ -1,36 +1,30 @@
 """Small local Tk assets and a quiet desktop theme, without a web engine."""
-import math
 import tkinter as tk
 from tkinter import font, ttk
+from PIL import Image, ImageDraw, ImageTk
 
-BG = "#F7F8FA"
-SIDEBAR = "#EFF1F5"
+BG = "#F5F5F7"
+SIDEBAR = "#EBEDF1"
 SURFACE = "#FFFFFF"
 TEXT = "#20242D"
-MUTED = "#707784"
-LINE = "#E4E7ED"
+MUTED = "#626975"
+LINE = "#E1E3E8"
 BLUE = "#007AFF"
 
 
-def _rounded_image(master, size, radius, fill, border=None, knob=False):
-    """Render a tiny stretchable ttk element using Tk only."""
+def _rounded_image(master, size, radius, fill, border=None, knob=False, background=None):
+    """Cache anti-aliased nine-slice assets at actual device pixel dimensions."""
     width, height = size
-    image = tk.PhotoImage(master=master, width=width, height=height)
-    for y in range(height):
-        dy = max(radius - y - .5, y + .5 - (height - radius), 0)
-        inset = max(0, math.ceil(radius - math.sqrt(max(0, radius * radius - dy * dy)) - .5))
-        if width > 2 * inset:
-            image.put(border or fill, to=(inset, y, width - inset, y + 1))
-            if border and 0 < y < height - 1 and width - 2 * inset > 2:
-                image.put(fill, to=(inset + 1, y, width - inset - 1, y + 1))
+    factor = 4
+    image = Image.new("RGBA", (width * factor, height * factor), background or BG)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, width * factor - 1, height * factor - 1), radius * factor,
+                           fill=fill, outline=border, width=factor)
     if knob:
         diameter = height - 6
         left = width - height + 3 if knob == "on" else 3
-        for y in range(diameter):
-            dy = y + .5 - diameter / 2
-            inset = math.ceil(diameter / 2 - math.sqrt(max(0, (diameter / 2) ** 2 - dy * dy)) - .5)
-            image.put("#FFFFFF", to=(left + inset, y + 3, left + diameter - inset, y + 4))
-    return image
+        draw.ellipse((left * factor, 3 * factor, (left + diameter) * factor - 1, (3 + diameter) * factor - 1), fill="white")
+    return ImageTk.PhotoImage(image.resize(size, Image.Resampling.LANCZOS), master=master)
 
 
 def apply_theme(window, scale):
@@ -47,8 +41,8 @@ def apply_theme(window, scale):
     for prefix, color in (("", BG), ("Surface.", SURFACE), ("Sidebar.", SIDEBAR)):
         style.configure(prefix + "TLabel", background=color, foreground=TEXT)
         style.configure(prefix + "Muted.TLabel", background=color, foreground=MUTED)
-    style.configure("Title.TLabel", font=(family, 24, "bold"), foreground=TEXT)
-    style.configure("Eyebrow.TLabel", font=("Segoe UI", 9, "bold"), foreground=BLUE)
+    style.configure("Title.TLabel", font=(family, 21, "bold"), foreground=TEXT)
+    style.configure("Eyebrow.TLabel", font=("Segoe UI", 9), foreground=MUTED)
     style.configure("Surface.Heading.TLabel", background=SURFACE, font=(family, 12, "bold"))
     style.configure("Surface.Pin.TLabel", background=SURFACE, foreground=TEXT, font=("Consolas", 35, "bold"))
     style.configure("Sidebar.Brand.TLabel", background=SIDEBAR, font=("Segoe UI", 13, "bold"))
@@ -68,7 +62,8 @@ def apply_theme(window, scale):
     ):
         # Tk tiles image centers rather than stretching them. A 2x2 center
         # caused thousands of GDI copies on Windows during every page repaint.
-        images = [_rounded_image(window, (edge * 2 + 48, edge * 2 + 48), edge, c, border if c == normal else c)
+        background = SIDEBAR if "Nav." in name else BG if name == "Quiet.TButton" else SURFACE
+        images = [_rounded_image(window, (edge * 2 + 96, edge * 2 + 64), edge, c, border if c == normal else c, background=background)
                   for c in (normal, hover, pressed, "#ECEEF2")]
         window.theme_images.extend(images)
         element = name + ".surface"
@@ -78,14 +73,19 @@ def apply_theme(window, scale):
         style.layout(name, [(element, {"sticky": "nsew", "children": [
             ("Button.focus", {"sticky": "nsew", "children": [("Button.padding", {"sticky": "nsew", "children": [
                 ("Button.label", {"sticky": "nsew"})]})]})]})])
-        background = SIDEBAR if "Nav." in name else SURFACE if name in {"Primary.TButton", "Danger.TButton"} else BG
         style.configure(name, foreground=fg, background=background, padding=(round(14 * scale), round(9 * scale)),
                         width=0, borderwidth=0, anchor="center", focusthickness=1, focuscolor=BLUE)
         style.map(name, foreground=[("disabled", "#9B9FAB")])
     for name in ("Nav.TButton", "Selected.Nav.TButton"):
         style.configure(name, anchor="w", padding=(round(13 * scale), round(11 * scale)))
+    radius = round(12 * scale)
+    card = _rounded_image(window, (radius * 2 + 256, radius * 2 + 128), radius, SURFACE, LINE)
+    window.theme_images.append(card)
+    style.element_create("Card.surface", "image", card, border=radius + 1, sticky="nsew")
+    style.layout("Card.TFrame", [("Card.surface", {"sticky": "nsew", "children": [("Frame.padding", {"sticky": "nsew"})]})])
+    style.configure("Card.TFrame", background=BG)
     switch_size = round(38 * scale), round(22 * scale)
-    switch_images = [_rounded_image(window, switch_size, switch_size[1] / 2, color, knob=knob)
+    switch_images = [_rounded_image(window, switch_size, switch_size[1] / 2, color, knob=knob, background=SURFACE)
                      for color, knob in (("#C4CAD4", "off"), (BLUE, "on"), ("#A4B5CC", "on"), ("#D8DCE3", "off"))]
     window.theme_images.extend(switch_images)
     style.element_create("Switch.indicator", "image", switch_images[0],
@@ -101,10 +101,10 @@ def apply_theme(window, scale):
         style.map(name, fieldbackground=[("readonly", SURFACE)], bordercolor=[("focus", BLUE)])
     style.configure("Horizontal.TScale", background=SURFACE, troughcolor="#E8EDF4", borderwidth=0,
                     sliderwidth=round(14 * scale), sliderlength=round(18 * scale))
-    track = _rounded_image(window, (256, max(4, round(4 * scale))), 2, "#E5EAF1")
+    track = _rounded_image(window, (256, max(4, round(4 * scale))), 2, "#E5EAF1", background=SURFACE)
     thumb_size = round(19 * scale)
-    thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, SURFACE, "#9FAEC4")
-    disabled_thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, "#F3F4F6", "#D8DCE3")
+    thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, SURFACE, "#9FAEC4", background=SURFACE)
+    disabled_thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, "#F3F4F6", "#D8DCE3", background=SURFACE)
     window.theme_images.extend((track, thumb, disabled_thumb))
     style.element_create("Soft.Horizontal.Scale.trough", "image", track, border=2, padding=0, width=12, sticky="we")
     style.element_create("Soft.Horizontal.Scale.slider", "image", thumb, ("disabled", disabled_thumb), padding=0)
@@ -140,38 +140,10 @@ def rounded_rect(canvas, x1, y1, x2, y2, radius, **options):
 
 class Card(ttk.Frame):
     def __init__(self, parent, scale=1, padding=22, stretch=False):
-        super().__init__(parent)
-        self.inset = round(padding * scale)
-        self.radius = round(16 * scale)
-        self.stretch = stretch
-        self.drawn_size = None
-        self.canvas = tk.Canvas(self, background=BG, highlightthickness=0, borderwidth=0, height=1)
-        self.canvas.pack(fill="both", expand=True)
-        self.content = ttk.Frame(self.canvas, style="Surface.TFrame")
-        self.item = self.canvas.create_window(self.inset, self.inset, anchor="nw", window=self.content)
-        self.canvas.bind("<Configure>", self.resize)
-        self.content.bind("<Configure>", self.resize)
-
-    def resize(self, event=None):
-        width = max(1, self.canvas.winfo_width())
-        options = {"width": max(1, width - self.inset * 2)}
-        if self.stretch:
-            options["height"] = max(1, self.canvas.winfo_height() - self.inset * 2)
-        else:
-            height = self.content.winfo_reqheight() + self.inset * 2
-            if int(self.canvas.cget("height")) != height:
-                self.canvas.configure(height=height)
-        changed = {key: value for key, value in options.items() if round(float(self.canvas.itemcget(self.item, key))) != value}
-        if changed:
-            self.canvas.itemconfigure(self.item, **changed)
-        height = max(1, self.canvas.winfo_height())
-        if self.drawn_size == (width, height):
-            return
-        self.drawn_size = width, height
-        self.canvas.delete("outline")
-        rounded_rect(self.canvas, 1, 1, max(2, width - 1), max(2, height - 2), self.radius,
-                     fill=SURFACE, outline=LINE, width=1, tags="outline")
-        self.canvas.tag_lower("outline")
+        # One native layout container instead of Frame -> Canvas -> window ->
+        # Frame and mutually-triggered Configure callbacks on every resize.
+        super().__init__(parent, style="Card.TFrame", padding=round(padding * scale))
+        self.content = self
 
 
 class Columns(ttk.Frame):
@@ -186,7 +158,7 @@ class Columns(ttk.Frame):
         self.bind("<Configure>", self.reflow)
 
     def reflow(self, event):
-        wide = event.width >= round(660 * self.scale)
+        wide = event.width >= round(490 * self.scale)
         if self.wide == wide:
             return
         self.wide = wide
@@ -212,9 +184,7 @@ def preference_row(parent, text, description, variable, command, scale=1):
 
 
 def line_icon(master, kind, size=20, color=MUTED):
-    """Original line drawings for navigation; no bundled third-party icon font."""
-    image = tk.PhotoImage(master=master, width=size, height=size)
-    # Rasterize at logical 20 px, then scale. A few hundred pixels per icon.
+    """Original vectors rasterized with coverage antialiasing at device scale."""
     segments = {
         "remote": [(4, 3, 16, 3), (16, 3, 16, 17), (16, 17, 4, 17), (4, 17, 4, 3),
                    (7, 7, 13, 7), (7, 10, 13, 10), (9, 14, 11, 14)],
@@ -228,14 +198,15 @@ def line_icon(master, kind, size=20, color=MUTED):
         "help": [(7, 6, 8, 4), (8, 4, 12, 4), (12, 4, 14, 6), (14, 6, 14, 8),
                  (14, 8, 10, 11), (10, 11, 10, 12), (10, 15, 10, 16)],
     }
-    width = max(1, round(size / 14))
+    image = Image.new("RGBA", (size * 4, size * 4))
+    draw = ImageDraw.Draw(image)
+    width = max(4, round(size * 4 / 15))
     for x1, y1, x2, y2 in segments[kind]:
-        steps = max(abs(x2 - x1), abs(y2 - y1)) * size
-        for i in range(steps + 1):
-            x = round((x1 + (x2 - x1) * i / max(1, steps)) * (size - 1) / 20)
-            y = round((y1 + (y2 - y1) * i / max(1, steps)) * (size - 1) / 20)
-            image.put(color, to=(x, y, min(size, x + width), min(size, y + width)))
-    return image
+        points = [(round(x * size * 4 / 20), round(y * size * 4 / 20)) for x, y in ((x1, y1), (x2, y2))]
+        draw.line(points, fill=color, width=width)
+        for x, y in points:
+            draw.ellipse((x - width / 2, y - width / 2, x + width / 2, y + width / 2), fill=color)
+    return ImageTk.PhotoImage(image.resize((size, size), Image.Resampling.LANCZOS), master=master)
 
 
 def tooltip(widget, text):

@@ -98,6 +98,9 @@ class CachedPages(ttk.Frame):
         self.focus_command = self.register(self.allow_focus)
         self.page_sizes = {}
         self.current_size = None
+        scale = max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72))
+        self.max_page_width = round(640 * scale)
+        self.compact_page_width = round(360 * scale)
         self.compositor = None
         self.transition_timer = None
         self.transition_page = None
@@ -122,7 +125,16 @@ class CachedPages(ttk.Frame):
             self.pages[index].place_configure(width=size[0], height=size[1])
 
     def resize(self, event):
-        size = max(1, event.width), max(1, event.height)
+        # Stable desktop/compact reading widths: dragging one more pixel must
+        # not remeasure and wrap every label in every page. Only cross-layout
+        # changes and unusually narrow accessibility layouts need reflow.
+        width = self.max_page_width if event.width >= self.max_page_width else min(event.width, self.compact_page_width)
+        size = max(1, width), max(1, event.height)
+        offset = max(0, (event.width - size[0]) // 2)
+        if offset != getattr(self, "page_offset", None):
+            self.page_offset = offset
+            for page in self.pages:
+                page.place_configure(x=offset)
         if size == self.current_size:
             return
         self.finish_transition()
@@ -248,6 +260,7 @@ class ScrollablePage(ttk.Frame):
         self.content = ttk.Frame(self.canvas, padding=padding)
         self.item = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
         self.content_width = self.scroll_region = None
+        self.max_content_width = round(652 * max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72)))
         self.canvas.bind("<Configure>", self.resize)
         self.content.bind("<Configure>", self.update_scroll_region)
         self.winfo_toplevel().bind("<MouseWheel>", self.wheel, add=True)
@@ -255,7 +268,9 @@ class ScrollablePage(ttk.Frame):
         self.canvas.bind("<Prior>", lambda event: self.canvas.yview_scroll(-1, "pages"))
 
     def resize(self, event):
-        width = max(1, event.width)
+        width = max(1, min(event.width, self.max_content_width))
+        # A stable leading edge avoids moving every descendant HWND on each
+        # pixel of a window drag. Extra desktop space stays as a quiet margin.
         if width != self.content_width:
             self.content_width = width
             self.canvas.itemconfigure(self.item, width=width)
