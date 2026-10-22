@@ -47,3 +47,7 @@
 ## 电脑滚动与绘制 · 0.5.7
 
 实际阅读 Qt QScrollArea、QWidget 和 VS Code Scrollable 源码 / 文档，采用独立裁剪视口、内容移动、合并输入和按时间推进的原则，并阅读 Windows 子窗口滚动与分层窗口限制。具体链接、实现对应与同机复测结果见[渲染优化](RENDERING.md)。保留 Tk 与系统合成，没有加入额外网页引擎。
+
+## 启动、版本与无动画切页 · 0.5.8
+
+实际阅读 PyInstaller 单文件 / 目录模式、Tkinter 线程模型、Windows 分层绘制及 GitHub 发布 API 文档，改为安装时展开依赖、无页面动画和按需滚动缓存，后台检查自身版本。测量方法与已知边界见[性能说明](RENDERING.md)。

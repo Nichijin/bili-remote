@@ -30,9 +30,12 @@ if __name__ == "__main__":
             pages.select(1)
             window.update_idletasks()
             scroller.viewport.yview_moveto(.2)
-            result["page_composition"] = len(pages.compositor.surfaces) == 2
-            result["scroll_composition"] = bool(scroller.viewport.compositor.retained)
+            result["page_cache"] = len(pages.pages) == 2
+            result["page_animation_disabled"] = not hasattr(pages, "transition_timer")
+            result["scroll_renderer"] = bool(scroller.viewport.compositor.surfaces)
             result["scroll_runtime"] = scroller.viewport.yview()[0] > 0
+            from desktop.version import APP_VERSION
+            result["app_version"] = APP_VERSION
             window.destroy()
             result["gui_runtime"] = True
             return result

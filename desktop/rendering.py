@@ -72,6 +72,24 @@ class PageCompositor:
             return False
         return alpha == 255 if surface[0] not in self.retained else bool(self.user.SetLayeredWindowAttributes(surface[0], 0, alpha, 2))
 
+    def retain(self, page):
+        surface = self.surfaces.get(page)
+        if not surface or surface[0] in self.retained:
+            return
+        handle, style = surface
+        if not self.user.IsWindowVisible(handle):
+            return
+        self.set_style(handle, -20, style | self.LAYERED)
+        self.retained.add(handle)
+        if not self.opacity(page, 255):
+            self.set_style(handle, -20, style)
+            self.retained.discard(handle)
+            return
+        # Populate a newly created surface from already mapped real controls
+        # before returning to the event loop, rather than exposing a blank
+        # backing surface and waiting for a later paint pass.
+        self.user.RedrawWindow(handle, None, None, 0x185)
+
     def move(self, page, y):
         surface = self.surfaces.get(page)
         # Only translate the retained HWND surface. No geometry manager call,

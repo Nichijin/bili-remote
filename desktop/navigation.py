@@ -1,4 +1,4 @@
-"""Focusable menu items sharing one smoothly translated selection surface."""
+"""Focusable menu items with an immediate rounded selection background."""
 import tkinter as tk
 from .appearance import SIDEBAR, _rounded_image
 
@@ -75,16 +75,12 @@ class NavigationButton(tk.Canvas):
 
 
 class NavigationSelection:
-    """Reuse a single rounded image across rows; every frame only moves items.
-
-    CachedPages drives progress, so the highlight and content share one timer.
-    Each Canvas clips its part of the same moving pill. Text remains fixed.
-    """
+    """Share one small rounded image; selection changes do not animate."""
     def __init__(self, buttons, scale):
         self.buttons, self.scale = buttons, scale
         self.current = None
         self.closed = False
-        self.y = self.start_y = self.target_y = None
+        self.y = self.target_y = None
         self.asset = self.asset_size = None
         for button in buttons:
             button.selection = self
@@ -105,21 +101,15 @@ class NavigationSelection:
             for item in self.buttons:
                 item.itemconfigure(item.indicator, image=self.asset)
         if self.target_y != self.target():
-            self.y = self.start_y = self.target_y = self.target()
+            self.y = self.target_y = self.target()
         self.draw()
 
-    def select(self, index, animate):
+    def select(self, index):
         self.current = index
-        self.start_y = self.y if self.y is not None else self.target()
         self.target_y = self.target()
         self.resize()
-        self.y = self.start_y if animate else self.target_y
+        self.y = self.target_y
         self.draw()
-
-    def progress(self, fraction):
-        if self.current is not None and not self.closed:
-            self.y = self.start_y + (self.target_y-self.start_y)*fraction
-            self.draw()
 
     def draw(self):
         if self.y is not None and not self.closed:

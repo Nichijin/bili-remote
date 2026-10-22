@@ -55,7 +55,7 @@ def main():
                         if isinstance(widget, FlowRow):
                             for child in widget.items:
                                 assert child.winfo_x() + child.winfo_width() <= widget.winfo_width() + 2, (width, height, scale, child)
-                for tab, scroller in ((0, app.remote_page), (3, app.options_page)):
+                for tab, scroller in ((0, app.remote_page), (1, app.clients_page), (3, app.options_page)):
                     app.tabs.select(tab); app.window.update()
                     assert scroller.content.winfo_width() == scroller.canvas.winfo_width(), "Scrollable content width capped"
                     scroller.canvas.yview_moveto(1); app.window.update()

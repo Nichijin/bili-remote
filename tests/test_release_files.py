@@ -25,6 +25,14 @@ def test_inconsistent_versions_stop_packaging(tmp_path):
     assert not list((tmp_path / "dist").iterdir())
 
 
+def test_desktop_displayed_version_must_match_installer(tmp_path):
+    release_project(tmp_path)
+    (tmp_path / "desktop").mkdir()
+    (tmp_path / "desktop/version.py").write_text('APP_VERSION = "1.2.2"\n', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="桌面运行版本"):
+        release_version(tmp_path)
+
+
 def test_archive_uses_matching_version_and_excludes_previous_packages(tmp_path):
     release_project(tmp_path)
     paths = release_paths(tmp_path)

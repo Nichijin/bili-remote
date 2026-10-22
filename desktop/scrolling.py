@@ -1,4 +1,4 @@
-"""Clipped live contents with retained Windows painting and coalesced wheel input.
+"""Clipped live contents with optional scroll caches and coalesced wheel input.
 
 Like QScrollArea, move one contents widget inside a viewport. A Canvas containing
 native child windows mixes pixel scrolling and child-window painting. Here the
@@ -38,7 +38,7 @@ class ScrollViewport(ttk.Frame):
         self.bind("<Destroy>", self.on_destroy, add=True)
 
     def prepare(self):
-        self.compositor = PageCompositor([self.content])
+        self.compositor = PageCompositor([self.content], layered_pages=[])
         if self.compositor.user:
             lines = wintypes.UINT()
             if self.compositor.user.SystemParametersInfoW(0x68, 0, byref(lines), 0):
@@ -84,10 +84,12 @@ class ScrollViewport(ttk.Frame):
 
     def yview_moveto(self, fraction):
         self.stop_scroll()
+        self.prepare_scroll_surface()
         self.set_offset(float(fraction)*self.extent)
 
     def yview_scroll(self, number, what):
         self.stop_scroll()
+        self.prepare_scroll_surface()
         self.set_offset(self.offset+int(number)*(16*self.scale if what == "units" else .9*self.winfo_height()))
 
     def key_scroll(self, direction):
@@ -112,6 +114,7 @@ class ScrollViewport(ttk.Frame):
         if target == self.offset:
             self.stop_scroll()
             return
+        self.prepare_scroll_surface()
         reduced_motion = not self.compositor or not self.compositor.animate
         if reduced_motion:
             self.set_offset(target)
@@ -122,6 +125,13 @@ class ScrollViewport(ttk.Frame):
             self.compositor.begin_motion()
             self.next_frame = self.started
             self.motion_timer = self.after_idle(self.animate_frame)
+
+    def prepare_scroll_surface(self):
+        # Allocate only after real controls are visible and a scroll is needed.
+        # Creating a layered child surface while the root is still withdrawn
+        # exposed black textures during initial mapping on Windows.
+        if self.compositor:
+            self.compositor.retain(self.content)
 
     def animate_frame(self):
         self.motion_timer = None

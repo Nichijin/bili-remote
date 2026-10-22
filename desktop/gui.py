@@ -26,6 +26,7 @@ from .pairing import PairingCode
 from .server import Relay
 from .trust import TrustStore
 from .subtitle_preview import SubtitlePreview
+from .version import APP_VERSION
 from .windows import NativeTray, Preferences, InstanceGuard, WINDOW_TITLE, data_directory, icon_path, installed_uninstaller, signal_existing, startup_enabled, set_startup
 
 
@@ -33,6 +34,8 @@ class Companion:
     def __init__(self, hidden=False, port=8765, discovery_port=8766, trust_path=None, background=False, preferences_path=None):
         enable_dpi_awareness()
         self.window = tk.Tk()
+        self.window.report_callback_exception = lambda kind, value, traceback: logging.error(
+            "界面回调失败", exc_info=(kind, value, traceback))
         # Prepare real controls and geometry before exposing the main window.
         # No partially constructed page is shown during cold startup.
         self.window.withdraw()
@@ -48,6 +51,11 @@ class Companion:
         self.detector = ClientDetector()
         self.inventory_visible = threading.Event()
         self.inventory_signature = None
+        self.inventory_rows = {}
+        self.inventory_force = threading.Event()
+        self.update_busy = False
+        self.update_started = False
+        self.update_download = ""
         self.feedback_save_timer = None
         self.feedback_editor = None
         self.feedback_dragging = False
@@ -69,6 +77,10 @@ class Companion:
         elif not hidden:
             self.window.update_idletasks()
             self.window.deiconify()
+            # Mapping creates real expose events that a withdrawn window's
+            # update_idletasks cannot process. Finish this one initial map /
+            # paint pass before returning a supposedly ready main window.
+            self.window.update()
 
     def build_ui(self):
         self.font_family = apply_theme(self.window, self.ui_scale)
@@ -80,6 +92,7 @@ class Companion:
         self.sidebar = ttk.Frame(self.shell, style="Sidebar.TFrame")
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
+        self.sidebar.configure(width=self.px(208))
         ttk.Frame(self.shell, width=1, style="Sidebar.TFrame").pack(side="left", fill="y")
         self.brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
         self.brand.pack(fill="x", padx=self.px(18), pady=(self.px(30), self.px(34)))
@@ -110,7 +123,6 @@ class Companion:
             self.window.bind(f"<Alt-Key-{index + 1}>", lambda event, n=index: tabs.select(n))
             self.navigation.append((button, text))
         self.navigation_selection = NavigationSelection([button for button, _ in self.navigation], self.ui_scale)
-        tabs.transition_observer = self.navigation_selection.progress
         self.sidebar_footer = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
         self.sidebar_footer.pack(side="bottom", fill="x", padx=self.px(14), pady=self.px(20))
         self.help_button = ttk.Button(self.sidebar_footer, text="使用指南  ↗", style="Nav.TButton", command=self.open_help)
@@ -127,8 +139,10 @@ class Companion:
         page_padding = (self.px(14), self.px(22))
         self.remote_page = ScrollablePage(remote_page, padding=page_padding)
         self.options_page = ScrollablePage(options_page, padding=page_padding)
+        self.clients_page = ScrollablePage(detection, padding=page_padding)
         remote, options = self.remote_page.content, self.options_page.content
-        detection.configure(padding=page_padding); records.configure(padding=page_padding)
+        detection = self.clients_page.content
+        records.configure(padding=page_padding)
         self.page_heading(remote, "连接与播放", "BILI REMOTE", "让手机成为遥控器，轻点、滑动或按住即可控制。")
         pairing_card = Card(remote, self.ui_scale)
         pairing_card.pack(fill="x", pady=(0, self.px(15)))
@@ -163,6 +177,15 @@ class Companion:
         actions.add(ttk.Button(actions, text="最小化", command=self.minimize))
         self.status.trace_add("write", self.update_service_presentation)
         self.page_heading(detection, "客户端与版本", "BILI REMOTE", "查看已安装的客户端，以及当前可用的控制功能。")
+        about = Card(detection, self.ui_scale, padding=14)
+        about.pack(fill="x", pady=(0, self.px(12)))
+        version_line = FlowRow(about, style="Surface.TFrame")
+        version_line.pack(fill="x")
+        version_line.add(ttk.Label(version_line, text="Bili Remote  ·  当前版本 "+APP_VERSION, style="Surface.Heading.TLabel"))
+        self.update_button = version_line.add(ttk.Button(version_line, text="检查更新", command=lambda: self.check_updates(manual=True)))
+        self.update_download_button = version_line.add(ttk.Button(version_line, text="下载新版", command=self.download_update, state="disabled"))
+        self.update_status = tk.StringVar(value="进入本页后在后台检查遥控器新版本。")
+        wrapped_label(about, textvariable=self.update_status, style="Surface.Muted.TLabel").pack(fill="x", pady=(self.px(6), 0))
         detection_actions = FlowRow(detection)
         detection_actions.pack(fill="x", pady=(0, self.px(12)))
         detection_actions.add(ttk.Button(detection_actions, text="重新检测", command=self.refresh_detection))
@@ -220,9 +243,9 @@ class Companion:
         management.pack(fill="x")
         for label, action, style in (("打开使用说明", self.open_help, "TButton"), ("卸载 / 清理本机数据", self.uninstall, "Danger.TButton"), ("完全退出", self.close, "TButton")):
             management.add(ttk.Button(management, text=label, command=action, style=style))
-        tabs.prepare()
         self.refresh_pin_label()
         self.resize_navigation()
+        tabs.prepare()
         self.on_page_changed()
 
     def px(self, value):
@@ -248,8 +271,11 @@ class Companion:
     def resize_navigation(self, event=None):
         if event is not None and event.widget is not self.window:
             return
-        compact = self.window.winfo_width() < self.px(880)
-        short = self.window.winfo_height() < self.px(560)
+        width, height = self.window.winfo_width(), self.window.winfo_height()
+        if width <= 1:
+            width, height = getattr(self.window, "initial_layout_size", (self.px(1040), self.px(780)))
+        compact = width < self.px(880)
+        short = height < self.px(560)
         if (compact, short) == (self.compact_navigation, self.short_navigation):
             return
         self.compact_navigation, self.short_navigation = compact, short
@@ -283,7 +309,7 @@ class Companion:
             button, name = self.navigation[index]
             selected = index == current
             button.set_selected(selected)
-        self.navigation_selection.select(current, self.tabs.compositor.animate and bool(self.tabs.winfo_ismapped()))
+        self.navigation_selection.select(current)
         self.active_navigation = current
         self.update_inventory_visibility()
 
@@ -533,29 +559,39 @@ class Companion:
         while True:
             if not self.inventory_visible.is_set() and not self.detection_request.is_set():
                 await self.detection_request.wait()
-            force = self.detection_request.is_set()
+            force = self.inventory_force.is_set()
+            self.inventory_force.clear()
             self.detection_request.clear()
             try:
                 installed, running = await asyncio.to_thread(self.detector.scan, force)
-                try:
-                    sessions = (await asyncio.wait_for(self.relay.native.discover(), 3))["sessions"]
-                except Exception:
-                    sessions = []
+                sessions = []
+                # Loading the WinRT media DLLs for a browser-only table used
+                # to cause a Python-wide import pause and retain unused DLLs.
+                native = self.relay.native
+                if installed or any(row["kind"] == "client" for row in running) or native.manager is not None:
+                    try:
+                        sessions = (await asyncio.wait_for(native.discover(), 3))["sessions"]
+                    except Exception:
+                        pass
                 browser = self.relay.browser
                 name = browser.executable.name.lower() if browser.running and browser.executable else ""
                 rows = combine(installed, running, sessions, name)
                 if rows != self.inventory_signature:
                     self.inventory_signature = rows
                     self.events.put(("inventory", rows))
+                self.events.put(("inventory_done", len(rows)))
             except Exception as exc:
                 logging.warning("客户端检测失败：%s", exc)
+                self.events.put(("inventory_error", "播放器检测失败，请重试。"))
             try:
                 await asyncio.wait_for(self.detection_request.wait(), 15)
             except asyncio.TimeoutError:
                 pass
 
-    def refresh_detection(self):
+    def refresh_detection(self, manual=True):
         self.inventory_status.set("正在检测…")
+        if manual:
+            self.inventory_force.set()
         if self.loop and self.detection_request:
             self.loop.call_soon_threadsafe(self.detection_request.set)
 
@@ -565,9 +601,46 @@ class Companion:
         visible = self.window.state() not in {"withdrawn", "iconic"} and self.tabs.select() == str(self.detection_page)
         if visible and not self.inventory_visible.is_set():
             self.inventory_visible.set()
-            self.refresh_detection()
+            self.refresh_detection(manual=False)
+            if not self.update_started and not self.hidden:
+                self.window.after_idle(self.check_updates)
         elif not visible:
             self.inventory_visible.clear()
+
+    def check_updates(self, manual=False):
+        if self.update_busy or self.closing:
+            return
+        self.update_busy = self.update_started = True
+        self.update_status.set("正在检查遥控器新版本…")
+        self.update_button.state(["disabled"])
+        cache = self.preferences.values.get("update_cache")
+        def work():
+            try:
+                from .updates import check_latest
+                self.events.put(("update_result", check_latest(cache, force=manual)))
+            except Exception as exc:
+                self.events.put(("update_error", str(exc)))
+        threading.Thread(target=work, name="release-check", daemon=True).start()
+
+    def show_update_result(self, result):
+        from .updates import version_tuple
+        self.update_busy = False
+        self.update_button.state(["!disabled"])
+        latest = result["version"]
+        newer = version_tuple(latest) > version_tuple(APP_VERSION)
+        self.update_download = result["download_url"] if newer else ""
+        self.update_download_button.state(["!disabled"] if newer else ["disabled"])
+        message = "发现新版本 "+latest+" · 当前 "+APP_VERSION if newer else (
+            "已是最新正式版 · "+APP_VERSION if version_tuple(latest) == version_tuple(APP_VERSION)
+            else "当前版本 "+APP_VERSION+" · 最新正式版 "+latest)
+        self.update_status.set(message+("（缓存结果）" if result["cached"] else ""))
+        with contextlib.suppress(OSError):
+            self.preferences.set("update_cache", result["cache"])
+
+    def download_update(self):
+        if self.update_download:
+            import webbrowser
+            webbrowser.open(self.update_download)
 
     def open_browser(self):
         if not self.loop or not self.relay:
@@ -644,7 +717,8 @@ class Companion:
             self.status.set("手机授权已取消，下次需重新输入配对码")
 
     def open_help(self):
-        path = Path(__file__).resolve().parents[1] / "README.md"
+        path = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+                else Path(__file__).resolve().parents[1]) / "README.md"
         if path.exists():
             os.startfile(path)
 
@@ -661,15 +735,17 @@ class Companion:
             elif kind == "operation":
                 operations.append(payload)
             elif kind == "inventory":
-                self.inventory.delete(*self.inventory.get_children())
-                for row in payload:
-                    self.inventory.insert("", "end", text=row.get("installed_name", row["name"]), values=(row["version"], "运行中" if row["running"] else "已安装", row["capabilities"]))
-                if payload:
-                    self.inventory_empty.place_forget()
-                else:
-                    self.inventory_empty.configure(text="暂未发现播放器\n打开哔哩哔哩播放窗口或客户端后，再次检测。")
-                    self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
-                self.inventory_status.set(f"检测到 {len(payload)} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
+                self.display_inventory(payload)
+            elif kind == "inventory_done":
+                self.inventory_status.set(f"检测到 {payload} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
+            elif kind == "inventory_error":
+                self.inventory_status.set(payload)
+            elif kind == "update_result":
+                self.show_update_result(payload)
+            elif kind == "update_error":
+                self.update_busy = False
+                self.update_button.state(["!disabled"])
+                self.update_status.set("检查更新失败："+payload)
             elif kind == "show":
                 self.show()
             elif kind == "quit":
@@ -688,6 +764,34 @@ class Companion:
             self.window.destroy()
             return
         self.window.after(16 if not self.events.empty() else 50, self.poll)
+
+    def display_inventory(self, rows):
+        # Keep stable row identities, selection and scroll position. Update only
+        # changed values instead of deleting and repainting the complete table.
+        current = {}
+        for index, row in enumerate(rows):
+            key = (row["kind"], row.get("path", ""), row["name"])
+            values = (row.get("installed_name", row["name"]), row["version"],
+                      "运行中" if row["running"] else "已安装", row["capabilities"])
+            existing = self.inventory_rows.get(key)
+            if existing is None:
+                item = self.inventory.insert("", index, text=values[0], values=values[1:])
+            else:
+                item, previous = existing
+                if values != previous:
+                    self.inventory.item(item, text=values[0], values=values[1:])
+                if self.inventory.index(item) != index:
+                    self.inventory.move(item, "", index)
+            current[key] = item, values
+        for key, (item, _) in self.inventory_rows.items():
+            if key not in current:
+                self.inventory.delete(item)
+        self.inventory_rows = current
+        if rows:
+            self.inventory_empty.place_forget()
+        else:
+            self.inventory_empty.configure(text="暂未发现播放器\n打开哔哩哔哩播放窗口或客户端后，再次检测。")
+            self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
 
     def display_operations(self, operations):
         text = operations[-1]["text"]

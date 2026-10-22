@@ -63,7 +63,7 @@ def main():
             app.window.deiconify()
             app.window.update()
             app.tabs.select(3)
-            app.tabs.finish_transition()
+            getattr(app.tabs, "finish_transition", lambda: None)()
             app.window.update()
             app.window.lift()
             deadline = time.monotonic()+.15
@@ -114,6 +114,8 @@ def main():
             assert controls == tuple(child.winfo_id() for child in content.winfo_children()), "Scroll recreated controls"
             assert not any(sample["different_bounds"] for sample in comparisons), comparisons
             # Route a real Windows wheel notch to the live scrolled widget.
+            app.navigation[3][0].focus_set()
+            app.window.update()
             user.SetCursorPos(point.x, point.y)
             before = viewport.yview()[0]*content.winfo_height()
             user.mouse_event(0x800, 0, 0, (-120) & 0xffffffff, 0)
@@ -152,9 +154,9 @@ def main():
                 app.tabs.select(0)
                 app.window.update()
                 assert viewport.motion_timer is None and not viewport.compositor.motion_clock_active
-                app.tabs.finish_transition()
+                getattr(app.tabs, "finish_transition", lambda: None)()
                 app.tabs.select(3)
-                app.tabs.finish_transition()
+                getattr(app.tabs, "finish_transition", lambda: None)()
                 viewport.compositor.animate = False
                 viewport.yview_moveto(0)
                 viewport.wheel(-120)
@@ -170,6 +172,7 @@ def main():
                       "screen_capture_method": "ImageGrab after Tk event drain and DwmFlush, before forced redraw; not PrintWindow or optical scanout",
                       "screen_comparisons": comparisons, "screen_matches_full_repaint": True,
                       "physical_wheel_pixels_per_notch": round(wheel_moved, 2),
+                      "wheel_after_menu_focus": True,
                       "native_click_after_scroll": True,
                       "controls_and_dimensions_preserved": True, "callback_errors": errors}
             args.output.parent.mkdir(parents=True, exist_ok=True)

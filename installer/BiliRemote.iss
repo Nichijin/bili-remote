@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.5.7"
+  #define AppVersion "0.5.8"
 #endif
 #define AppExe "BiliRemote-Desktop.exe"
 #ifndef AppSourcePath
@@ -55,8 +55,14 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 Name: "autostart"; Description: "登录 Windows 后自动启动（可在软件设置中修改）"; Flags: unchecked
 Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
+[InstallDelete]
+; This directory contains only shipped runtime files. Remove obsolete runtime
+; modules after closing the old instance; user data is stored separately.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "{#AppSourcePath}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AppSourcePath}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -147,7 +147,7 @@ def capture_window(window, path):
     """Capture only this window's client pixels; never capture the user's screen."""
     window.update_idletasks()
     window.update()
-    # Capture a settled page, including native composition and its short fade.
+    # Drain normal widget drawing; page switching has no animation.
     deadline = time.monotonic() + .25
     while time.monotonic() < deadline:
         window.update()
@@ -335,6 +335,7 @@ def build_gestures():
 
 def build_desktop_panels():
     for stem, title, subtitle in [("desktop-main", "电脑端：配对与播放入口", "真实桌面组件渲染 · 配对码、电脑名称与地址为示例"),
+                                  ("desktop-players", "电脑端：当前版本与检查更新", "版本检查在后台进行 · 首次进入页面后检查，可手动重试"),
                                   ("desktop-settings", "电脑端：托盘、自启与操作提示", "设置项作用于电脑端；图示使用独立预览实例，未修改你的正式配置")]:
         image, draw = canvas(1120, 1010, title, subtitle)
         raw = Image.open(RAW / (stem + ".png")).convert("RGB")

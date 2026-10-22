@@ -166,6 +166,17 @@ def main():
         assert read_value(uninstall_key, "DisplayVersion") == new_version
         assert Path(read_value(uninstall_key, "InstallLocation")).resolve() == app_dir
         assert hashlib.sha256(exe.read_bytes()).digest() == hashlib.sha256((ROOT / "dist/BiliRemote-Desktop.exe").read_bytes()).digest()
+        runtime = ROOT / "dist/_internal"
+        if runtime.is_dir():
+            for source_file in runtime.rglob("*"):
+                if source_file.is_file():
+                    installed_file = app_dir / "_internal" / source_file.relative_to(runtime)
+                    assert installed_file.is_file(), installed_file
+                    assert hashlib.sha256(installed_file.read_bytes()).digest() == hashlib.sha256(source_file.read_bytes()).digest(), installed_file
+            for source_file in [ROOT / "README.md", ROOT / "CHANGELOG.md", *(ROOT / "docs").rglob("*")]:
+                if source_file.is_file():
+                    installed_file = app_dir / source_file.relative_to(ROOT)
+                    assert installed_file.read_bytes() == source_file.read_bytes(), installed_file
         assert len(list(app_dir.glob("unins*.exe"))) == 1
         assert desktop_link.is_file(), "Existing desktop shortcut was not retained"
         assert read_value(RUN_KEY, identity) == command

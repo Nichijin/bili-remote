@@ -18,6 +18,11 @@ def release_version(root=ROOT):
         raise RuntimeError("版本号格式无效，不能用于安装包文件名。")
     if version != windows_match[1]:
         raise RuntimeError("安卓与 Windows 版本号不一致，请先同步版本再打包。")
+    desktop_version = root / "desktop/version.py"
+    if desktop_version.exists():
+        match = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', desktop_version.read_text(encoding="utf-8"), re.M)
+        if not match or match[1] != version:
+            raise RuntimeError("桌面运行版本与安装包版本不一致。")
     return version
 
 
