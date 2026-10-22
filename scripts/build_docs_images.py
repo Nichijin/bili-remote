@@ -193,7 +193,6 @@ def capture_window(window, path):
 
 
 def capture_desktop():
-    import tkinter.ttk as ttk
     with tempfile.TemporaryDirectory(prefix="bili-docs-") as directory:
         os.environ["BILI_REMOTE_INSTANCE_NAME"] = "BiliRemote-DocumentationPreview"
         os.environ["BILI_REMOTE_DATA_DIR"] = directory
@@ -214,18 +213,27 @@ def capture_desktop():
             app = Preview(hidden=True)
         try:
             app.window.title("哔哩哔哩手势遥控 · 文档界面预览")
-            app.window.geometry("760x730+30+30")
+            app.window.geometry(f"{app.px(1040)}x{app.px(820)}+30+30")
             app.window.deiconify()
             capture_window(app.window, RAW / "desktop-main.png")
-            tabs = next(widget for frame in app.window.winfo_children() for widget in frame.winfo_children() if isinstance(widget, ttk.Notebook))
+            tabs = app.tabs
+            tabs.select(1)
+            capture_window(app.window, RAW / "desktop-players.png")
+            tabs.select(2)
+            capture_window(app.window, RAW / "desktop-records.png")
             tabs.select(3)
             capture_window(app.window, RAW / "desktop-settings.png")
-            app.window.geometry("760x900+30+30")
+            app.window.geometry(f"{app.px(1040)}x{app.px(880)}+30+30")
             app.window.update()
             page = app.options_page
-            page.canvas.yview_moveto(app.feedback_frame.winfo_y() / max(1, page.content.winfo_height()))
+            offset = app.feedback_frame.winfo_rooty() - page.content.winfo_rooty()
+            page.canvas.yview_moveto(offset / max(1, page.content.winfo_height()))
             app.window.update()
             capture_window(app.window, RAW / "desktop-feedback.png")
+            app.window.minsize(1, 1)
+            app.window.geometry("560x650+30+30")
+            tabs.select(0)
+            capture_window(app.window, RAW / "desktop-compact.png")
         finally:
             app.window.destroy()
 

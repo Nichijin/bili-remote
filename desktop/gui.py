@@ -16,10 +16,11 @@ from tkinter import colorchooser, messagebox, ttk
 
 from websockets.asyncio.server import serve
 
+from .appearance import BLUE, LINE, MUTED, SIDEBAR, SURFACE, TEXT, Card, Columns, apply_theme, line_icon, preference_row, rounded_rect, tooltip
 from .detection import ClientDetector, combine
 from .discovery import start_discovery
 from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
-from .layout import FlowRow, ScrollablePage, check_option, enable_dpi_awareness, fit_window, wrapped_label
+from .layout import FlowRow, ScrollablePage, enable_dpi_awareness, fit_window, wrapped_label
 from .pairing import PairingCode
 from .server import Relay
 from .trust import TrustStore
@@ -62,49 +63,103 @@ class Companion:
             self.minimize()
 
     def build_ui(self):
-        frame = ttk.Frame(self.window, padding=round(16 * self.ui_scale))
-        frame.pack(fill="both", expand=True)
-        wrapped_label(frame, text="哔哩哔哩手势遥控", font=("Microsoft YaHei", 19)).pack(anchor="w", pady=(0, 12))
-        tabs = ttk.Notebook(frame)
-        tabs.pack(fill="both", expand=True)
+        self.font_family = apply_theme(self.window, self.ui_scale)
+        self.compact_navigation = None
+        self.short_navigation = None
+        self.shell = ttk.Frame(self.window)
+        self.shell.pack(fill="both", expand=True)
+        self.sidebar = ttk.Frame(self.shell, style="Sidebar.TFrame")
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        ttk.Frame(self.shell, width=1, style="Sidebar.TFrame").pack(side="left", fill="y")
+        self.brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
+        self.brand.pack(fill="x", padx=self.px(18), pady=(self.px(30), self.px(34)))
+        logo = tk.Canvas(self.brand, width=self.px(36), height=self.px(36), background=SIDEBAR, highlightthickness=0)
+        logo.pack(side="left")
+        rounded_rect(logo, 0, 0, self.px(36), self.px(36), self.px(10), fill=BLUE, outline="")
+        logo.create_line(*[self.px(v) for v in (10, 12, 26, 12, 26, 25, 10, 25, 10, 12)], fill="white", width=self.px(2), joinstyle="round")
+        logo.create_line(*[self.px(v) for v in (13, 7, 17, 11, 23, 7)], fill="white", width=self.px(2), joinstyle="round")
+        self.brand_text = ttk.Frame(self.brand, style="Sidebar.TFrame")
+        self.brand_text.pack(side="left", padx=(self.px(9), 0))
+        ttk.Label(self.brand_text, text="Bili Remote", style="Sidebar.Brand.TLabel").pack(anchor="w")
+        ttk.Label(self.brand_text, text="哔哩哔哩手势遥控", style="Sidebar.Caption.TLabel").pack(anchor="w", pady=(self.px(3), 0))
+        self.nav_heading = ttk.Label(self.sidebar, text="工作空间", style="Sidebar.Caption.TLabel")
+        self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)))
+        tabs = ttk.Notebook(self.shell, style="Pages.TNotebook", takefocus=False)
+        tabs.pack(side="left", fill="both", expand=True)
         remote_page, detection, options_page, records = [ttk.Frame(tabs) for _ in range(4)]
         for widget, name in ((remote_page, "连接与播放"), (detection, "客户端与版本"), (records, "操作记录"), (options_page, "设置")):
             tabs.add(widget, text=name)
         self.tabs = tabs
         self.detection_page = detection
-        tabs.bind("<<NotebookTabChanged>>", self.update_inventory_visibility)
+        self.navigation = []
+        self.nav_icons = []
+        for index, (text, kind) in enumerate((("连接与播放", "remote"), ("客户端与版本", "devices"), ("操作记录", "history"), ("设置", "settings"))):
+            icons = [line_icon(self.window, kind, self.px(20), color) for color in ("#667184", "#0065D5")]
+            self.nav_icons.append(icons)
+            button = ttk.Button(self.sidebar, text="  " + text, image=icons[0], compound="left", style="Nav.TButton",
+                                command=lambda n=index: tabs.select(n), takefocus=True)
+            button.pack(fill="x", padx=self.px(10), pady=self.px(3))
+            tooltip(button, f"{text}  ·  Alt+{index + 1}")
+            self.window.bind(f"<Alt-Key-{index + 1}>", lambda event, n=index: tabs.select(n))
+            self.navigation.append((button, text))
+        self.sidebar_footer = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
+        self.sidebar_footer.pack(side="bottom", fill="x", padx=self.px(14), pady=self.px(20))
+        self.help_button = ttk.Button(self.sidebar_footer, text="使用指南  ↗", style="Nav.TButton", command=self.open_help)
+        self.help_button.pack(fill="x", pady=(0, self.px(16)))
+        self.service_hint = tk.StringVar(value="●  正在启动")
+        self.service_label = ttk.Label(self.sidebar_footer, textvariable=self.service_hint, style="Sidebar.Caption.TLabel")
+        self.service_label.pack(anchor="w", padx=self.px(8))
+        tabs.bind("<<NotebookTabChanged>>", self.on_page_changed)
+        self.window.bind("<Configure>", self.resize_navigation, add=True)
         self.window.bind("<Map>", self.update_inventory_visibility, add=True)
         self.window.bind("<Unmap>", self.update_inventory_visibility, add=True)
-        self.remote_page = ScrollablePage(remote_page, padding=round(14 * self.ui_scale))
-        self.options_page = ScrollablePage(options_page, padding=round(14 * self.ui_scale))
+        self.remote_page = ScrollablePage(remote_page, padding=self.px(26))
+        self.options_page = ScrollablePage(options_page, padding=self.px(26))
         remote, options = self.remote_page.content, self.options_page.content
-        detection.configure(padding=round(14 * self.ui_scale)); records.configure(padding=round(14 * self.ui_scale))
-        wrapped_label(remote, text="手机打开即搜索。首次输入下方配对码，以后自动连接。").pack(anchor="w")
-        pin_frame = FlowRow(remote)
-        pin_frame.pack(fill="x", pady=12)
-        self.pin_text = tk.StringVar()
-        pin_frame.add(ttk.Label(pin_frame, textvariable=self.pin_text, font=("Consolas", 30, "bold")))
-        pin_frame.add(ttk.Button(pin_frame, text="刷新配对码", command=self.refresh_pin))
-        wrapped_label(remote, text="配对码每 10 分钟刷新，已连接手机不受影响。", foreground="#666666").pack(anchor="w")
+        detection.configure(padding=self.px(26)); records.configure(padding=self.px(26))
+        self.page_heading(remote, "连接与播放", "BILI REMOTE", "让手机成为遥控器，轻点、滑动或按住即可控制。")
+        pairing_card = Card(remote, self.ui_scale)
+        pairing_card.pack(fill="x", pady=(0, self.px(15)))
+        pairing_columns = Columns(pairing_card.content, self.ui_scale)
+        pairing_columns.pack(fill="x")
+        connection, pairing = pairing_columns.left, pairing_columns.right
+        ttk.Label(connection, text="连接你的手机", style="Surface.Heading.TLabel").pack(anchor="w")
+        wrapped_label(connection, text="两端接入同一局域网，在手机中选择这台电脑。", style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(6), self.px(10)))
         self.status = tk.StringVar(value="正在启动…")
-        wrapped_label(remote, textvariable=self.status).pack(anchor="w", pady=(18, 8))
+        self.status_label = wrapped_label(connection, textvariable=self.status, style="Surface.TLabel", foreground=BLUE)
+        self.status_label.pack(anchor="w", pady=(self.px(10), self.px(5)))
         self.addresses = tk.StringVar()
-        wrapped_label(remote, textvariable=self.addresses, foreground="#666666").pack(anchor="w")
-        player = ttk.LabelFrame(remote, text="播放视频", padding=12)
-        player.pack(fill="x", pady=16)
-        ttk.Button(player, text="打开哔哩哔哩 · 无需扩展", command=self.open_browser).pack(anchor="w")
-        wrapped_label(player, text="使用软件打开的 Edge / Chrome 窗口播放，可完整控制进度、音量和倍速。\nWindows 客户端可直接播放；可用功能由客户端提供的接口决定。", foreground="#666666").pack(anchor="w", pady=(8, 0))
+        wrapped_label(connection, textvariable=self.addresses, style="Surface.Muted.TLabel").pack(anchor="w", pady=(0, self.px(15)))
+        ttk.Label(pairing, text="首次连接配对码", style="Surface.Muted.TLabel").pack(anchor="w")
+        pin_frame = FlowRow(pairing, style="Surface.TFrame")
+        pin_frame.pack(fill="x", pady=(0, self.px(5)))
+        self.pin_text = tk.StringVar()
+        pin_frame.add(ttk.Label(pin_frame, textvariable=self.pin_text, style="Surface.Pin.TLabel"))
+        pin_frame.add(ttk.Button(pin_frame, text="刷新", command=self.refresh_pin))
+        wrapped_label(pairing, text="配对一次，以后自动重连。配对码每 10 分钟更新。", style="Surface.Muted.TLabel").pack(anchor="w")
+        player = self.card(remote, "播放视频", "打开专用播放窗口，选择你想看的视频。")
+        ttk.Button(player, text="打开哔哩哔哩 · 无需扩展", command=self.open_browser, style="Primary.TButton").pack(anchor="w", pady=(self.px(17), self.px(12)))
+        wrapped_label(player, text="专用 Edge / Chrome 窗口支持完整遥控。Windows 客户端请手动打开，可用功能取决于客户端接口。", style="Surface.Muted.TLabel").pack(anchor="w")
+        recent = self.card(remote, "最近一次操作")
         self.last_operation = tk.StringVar(value="尚无遥控操作")
-        wrapped_label(remote, textvariable=self.last_operation, font=("Microsoft YaHei", 12)).pack(anchor="w", pady=8)
+        wrapped_label(recent, textvariable=self.last_operation, style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(7), 0))
         actions = FlowRow(remote)
-        actions.pack(fill="x", pady=12)
+        actions.pack(fill="x", pady=(self.px(4), self.px(8)))
         self.toggle = ttk.Button(actions, text="停止服务", command=self.toggle_service)
         actions.add(self.toggle)
         actions.add(ttk.Button(actions, text="取消手机授权", command=self.revoke))
         actions.add(ttk.Button(actions, text="最小化", command=self.minimize))
-        wrapped_label(detection, text="自动读取播放器与版本，并检查实际可用的控制功能。").pack(anchor="w")
-        inventory_frame = ttk.Frame(detection)
-        inventory_frame.pack(fill="both", expand=True, pady=10)
+        self.status.trace_add("write", self.update_service_presentation)
+        self.page_heading(detection, "客户端与版本", "BILI REMOTE", "查看已安装的客户端，以及当前可用的控制功能。")
+        detection_actions = FlowRow(detection)
+        detection_actions.pack(fill="x", pady=(0, self.px(12)))
+        detection_actions.add(ttk.Button(detection_actions, text="重新检测", command=self.refresh_detection))
+        self.inventory_status = tk.StringVar(value="进入本页时检测，后台保持轻量运行。")
+        wrapped_label(detection, textvariable=self.inventory_status, style="Muted.TLabel").pack(anchor="w", pady=(0, self.px(14)))
+        table = Card(detection, self.ui_scale, padding=12, stretch=True)
+        table.pack(fill="both", expand=True)
+        inventory_frame = table.content
         inventory_frame.rowconfigure(0, weight=1); inventory_frame.columnconfigure(0, weight=1)
         self.inventory = ttk.Treeview(inventory_frame, columns=("version", "state", "capabilities"), height=6)
         self.inventory.heading("#0", text="客户端 / 浏览器")
@@ -113,45 +168,130 @@ class Companion:
             self.inventory.heading(column, text=title)
             self.inventory.column(column, width=width, minwidth=55)
         self.inventory.grid(row=0, column=0, sticky="nsew")
+        self.inventory_empty = wrapped_label(inventory_frame, text="等待检测播放器\n进入本页后自动检查已安装与正在运行的客户端。", style="Surface.Muted.TLabel", justify="center")
+        self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
         for orient, row, column, sticky, command in (("vertical", 0, 1, "ns", self.inventory.yview), ("horizontal", 1, 0, "ew", self.inventory.xview)):
             bar = ttk.Scrollbar(inventory_frame, orient=orient, command=command)
             bar.grid(row=row, column=column, sticky=sticky)
             self.inventory.configure(**{("y" if orient == "vertical" else "x") + "scrollcommand": bar.set})
-        self.inventory_status = tk.StringVar(value="打开本页时检测，后台不持续读取客户端接口。")
-        wrapped_label(detection, textvariable=self.inventory_status, foreground="#666666").pack(anchor="w", before=inventory_frame)
-        ttk.Button(detection, text="重新检测", command=self.refresh_detection).pack(anchor="w", pady=10, before=inventory_frame)
-        records_frame = ttk.Frame(records)
-        records_frame.pack(fill="both", expand=True)
+        self.page_heading(records, "操作记录", "BILI REMOTE", "保留本次运行最近 100 条记录，失败原因也会显示在这里。")
+        log_card = Card(records, self.ui_scale, padding=14, stretch=True)
+        log_card.pack(fill="both", expand=True)
+        records_frame = log_card.content
         records_frame.rowconfigure(0, weight=1); records_frame.columnconfigure(0, weight=1)
-        self.records = tk.Listbox(records_frame, font=("Microsoft YaHei", 11), activestyle="none", borderwidth=0, height=4)
+        self.records = tk.Listbox(records_frame, font=(self.font_family, 11), activestyle="none", borderwidth=0, height=4,
+                                  background=SURFACE, foreground=TEXT, selectbackground="#E1EDFF", selectforeground="#0062C9",
+                                  highlightthickness=0, relief="flat")
         self.records.grid(row=0, column=0, sticky="nsew")
+        self.records_empty = wrapped_label(records_frame, text="还没有遥控操作\n连接手机后，操作与反馈会出现在这里。", style="Surface.Muted.TLabel", justify="center")
+        self.records_empty.place(relx=.5, rely=.5, anchor="center")
         for orient, row, column, sticky, command in (("vertical", 0, 1, "ns", self.records.yview), ("horizontal", 1, 0, "ew", self.records.xview)):
             bar = ttk.Scrollbar(records_frame, orient=orient, command=command)
             bar.grid(row=row, column=column, sticky=sticky)
             self.records.configure(**{("y" if orient == "vertical" else "x") + "scrollcommand": bar.set})
-        wrapped_label(records, text="保留本次运行最近 100 条操作；错误也会显示在这里。", foreground="#666666").pack(anchor="w", pady=10, before=records_frame)
+        self.page_heading(options, "设置", "BILI REMOTE", "管理启动方式、提示字幕和本机数据。修改会自动保存。")
+        general = self.card(options, "通用")
         self.autostart = tk.BooleanVar(value=startup_enabled())
-        check_option(options, "登录 Windows 后自动启动", self.autostart, self.change_startup)
+        preference_row(general, "开机自启", "登录 Windows 后自动启动", self.autostart, self.change_startup, self.ui_scale)
+        self.separator(general)
         self.close_to_tray = tk.BooleanVar(value=self.preferences.values.get("close_to_tray", True))
-        check_option(options, "关闭窗口时保留在系统托盘运行", self.close_to_tray, lambda: self.save_preference("close_to_tray", self.close_to_tray.get()))
+        preference_row(general, "关闭后保留在托盘", "后台继续连接，双击托盘图标可返回", self.close_to_tray,
+                       lambda: self.save_preference("close_to_tray", self.close_to_tray.get()), self.ui_scale)
+        feedback = self.card(options, "遥控提示字幕", "操作时在电脑屏幕短暂显示反馈，不打断播放。")
         self.show_feedback = tk.BooleanVar(value=self.preferences.values.get("show_feedback", True))
-        check_option(options, "开启遥控提示字幕", self.show_feedback, self.change_feedback_enabled)
-        self.build_feedback_settings(options)
-        wrapped_label(options, text="电脑在线时会广播供手机发现。配对过的手机不再需要输入配对码。\n双击托盘图标打开，右键可完全退出。", foreground="#666666").pack(anchor="w", pady=16)
+        preference_row(feedback, "开启遥控提示字幕", "关闭后仍可在操作记录中查看反馈", self.show_feedback, self.change_feedback_enabled, self.ui_scale)
+        self.separator(feedback)
+        self.build_feedback_settings(feedback)
+        support = self.card(options, "帮助与管理", "电脑在线时会广播供手机发现，已配对的手机可自动重连。")
         self.options_status = tk.StringVar()
-        wrapped_label(options, textvariable=self.options_status).pack(anchor="w", pady=8)
-        for label, action in (("打开使用说明", self.open_help), ("卸载 / 清理本机数据", self.uninstall), ("完全退出", self.close)):
-            ttk.Button(options, text=label, command=action).pack(anchor="w", pady=7)
+        wrapped_label(support, textvariable=self.options_status, style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(6))
+        management = FlowRow(support, style="Surface.TFrame")
+        management.pack(fill="x")
+        for label, action, style in (("打开使用说明", self.open_help, "TButton"), ("卸载 / 清理本机数据", self.uninstall, "Danger.TButton"), ("完全退出", self.close, "TButton")):
+            management.add(ttk.Button(management, text=label, command=action, style=style))
         self.refresh_pin_label()
+        self.resize_navigation()
+        self.on_page_changed()
+
+    def px(self, value):
+        return max(1, round(value * self.ui_scale))
+
+    def page_heading(self, parent, title, section, subtitle):
+        ttk.Label(parent, text=section.upper(), style="Eyebrow.TLabel").pack(anchor="w", pady=(self.px(3), self.px(8)))
+        wrapped_label(parent, text=title, style="Title.TLabel").pack(anchor="w")
+        wrapped_label(parent, text=subtitle, style="Muted.TLabel").pack(anchor="w", pady=(self.px(8), self.px(25)))
+
+    def card(self, parent, title, subtitle=None):
+        card = Card(parent, self.ui_scale)
+        card.pack(fill="x", pady=(0, self.px(15)))
+        ttk.Label(card.content, text=title, style="Surface.Heading.TLabel").pack(anchor="w")
+        if subtitle:
+            wrapped_label(card.content, text=subtitle, style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(6), 0))
+        return card.content
+
+    def separator(self, parent):
+        line = tk.Frame(parent, background=LINE, height=1)
+        line.pack(fill="x", pady=self.px(4))
+
+    def resize_navigation(self, event=None):
+        if event is not None and event.widget is not self.window:
+            return
+        compact = self.window.winfo_width() < self.px(880)
+        short = self.window.winfo_height() < self.px(560)
+        if (compact, short) == (self.compact_navigation, self.short_navigation):
+            return
+        self.compact_navigation, self.short_navigation = compact, short
+        self.sidebar.configure(width=self.px(70 if compact else 208))
+        self.brand.pack_configure(padx=self.px(17 if compact else 18), pady=(self.px(16 if short else 30), self.px(18 if short else 34)))
+        if compact:
+            self.brand_text.pack_forget()
+        else:
+            self.brand_text.pack(side="left", padx=(self.px(9), 0))
+        if compact or short:
+            self.nav_heading.pack_forget()
+        else:
+            self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)), before=self.navigation[0][0])
+        for button, name in self.navigation:
+            button.configure(compound="image" if compact else "left")
+        self.sidebar_footer.pack_configure(padx=self.px(8 if compact else 14), pady=self.px(12 if short else 20))
+        self.help_button.configure(text="?" if compact else "使用指南  ↗")
+        if short:
+            self.help_button.pack_forget()
+        else:
+            self.help_button.pack(fill="x", pady=(0, self.px(16)), before=self.service_label)
+        self.update_service_presentation()
+
+    def on_page_changed(self, event=None):
+        current = self.tabs.index(self.tabs.select())
+        for index, (button, name) in enumerate(self.navigation):
+            selected = index == current
+            button.configure(style="Selected.Nav.TButton" if selected else "Nav.TButton", image=self.nav_icons[index][int(selected)])
+        self.update_inventory_visibility()
+
+    def update_service_presentation(self, *args):
+        value = self.status.get()
+        color, hint = "#27835E", "服务在线"
+        if "失败" in value:
+            color, hint = "#C23B45", "服务异常"
+        elif "正在启动" in value or "正在停止" in value:
+            color, hint = "#9A6A18", "正在启动" if "启动" in value else "正在停止"
+        elif "已停止" in value or "请先启动" in value:
+            color, hint = MUTED, "服务已停止"
+        elif value.startswith("手机已连接"):
+            hint = "手机已连接"
+        self.service_hint.set("●" if self.compact_navigation else "●  " + hint)
+        self.service_label.configure(foreground=color)
+        self.status_label.configure(foreground=color)
 
     def refresh_pin_label(self):
         code = self.pairing.current()
         self.pin_text.set(code[:3] + " " + code[3:])
 
     def build_feedback_settings(self, parent):
-        frame = ttk.LabelFrame(parent, text="提示字幕样式", padding=12)
+        frame = ttk.Frame(parent, style="Surface.TFrame")
         self.feedback_frame = frame
-        frame.pack(fill="x", pady=(0, 12))
+        frame.pack(fill="x", pady=(self.px(14), 0))
+        ttk.Label(frame, text="提示字幕样式", style="Surface.Heading.TLabel").pack(anchor="w", pady=(0, self.px(12)))
         self.feedback_controls = []
         self.feedback_vars = {key: (tk.StringVar if key == "color" else tk.IntVar if key == "font_size" else tk.DoubleVar)(value=value) for key, value in self.feedback_style.items()}
         self.feedback_readouts = {}
@@ -159,32 +299,32 @@ class Companion:
                                    "左侧居中": (5, 50), "屏幕中央": (50, 50), "右侧居中": (95, 50),
                                    "左下": (5, 88), "下方居中": (50, 88), "右下": (95, 88)}
         self.feedback_position = tk.StringVar(value="自定义")
-        row = FlowRow(frame); row.pack(fill="x", pady=3)
-        row.add(ttk.Label(row, text="位置预设"))
+        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(3))
+        row.add(ttk.Label(row, text="位置预设", style="Surface.TLabel"))
         preset = row.add(ttk.Combobox(row, textvariable=self.feedback_position, values=[*self.feedback_positions, "自定义"], state="readonly", width=12))
         preset.bind("<<ComboboxSelected>>", self.choose_feedback_position)
         self.feedback_controls.append(preset)
         for key in ("x", "y", "opacity"):
-            line = ttk.Frame(frame); line.pack(fill="x", pady=7)
+            line = ttk.Frame(frame, style="Surface.TFrame"); line.pack(fill="x", pady=self.px(10))
             caption = tk.StringVar(); self.feedback_readouts[key] = caption
-            ttk.Label(line, textvariable=caption).pack(anchor="w")
+            ttk.Label(line, textvariable=caption, style="Surface.TLabel").pack(anchor="w")
             control = ttk.Scale(line, from_=10 if key == "opacity" else 0, to=100, variable=self.feedback_vars[key])
             control.pack(fill="x", pady=(5, 0)); self.feedback_controls.append(control)
-        row = FlowRow(frame); row.pack(fill="x", pady=4)
-        row.add(ttk.Label(row, text="字号（10–64 pt）"))
+        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(5))
+        row.add(ttk.Label(row, text="字号（10–64 pt）", style="Surface.TLabel"))
         control = row.add(ttk.Spinbox(row, from_=10, to=64, increment=1, width=6, textvariable=self.feedback_vars["font_size"]))
         control.bind("<FocusOut>", self.finish_feedback_edit)
         control.bind("<Return>", self.finish_feedback_edit)
         self.feedback_controls.append(control)
-        row = FlowRow(frame); row.pack(fill="x", pady=4)
-        row.add(ttk.Label(row, text="文字颜色"))
+        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(5))
+        row.add(ttk.Label(row, text="文字颜色", style="Surface.TLabel"))
         color = row.add(ttk.Entry(row, textvariable=self.feedback_vars["color"], width=10))
         color.bind("<FocusOut>", self.finish_feedback_edit)
         color.bind("<Return>", self.finish_feedback_edit)
         chooser = row.add(ttk.Button(row, text="选择颜色", command=self.choose_feedback_color))
         self.feedback_controls.extend([color, chooser])
-        wrapped_label(frame, text="水平 0% 为左侧、100% 为右侧；垂直 0% 为顶部、100% 为底部。不透明度越小越透明，同时作用于文字和底色。字幕显示在电脑主窗口所在屏幕的工作区内。", foreground="#666666").pack(anchor="w", pady=7)
-        actions = FlowRow(frame); actions.pack(fill="x")
+        wrapped_label(frame, text="位置按屏幕工作区计算；不透明度同时作用于文字和底色。字幕显示在电脑主窗口所在的屏幕。", style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(12))
+        actions = FlowRow(frame, style="Surface.TFrame"); actions.pack(fill="x")
         self.feedback_controls.append(actions.add(ttk.Button(actions, text="预览提示字幕", command=self.preview_feedback)))
         self.feedback_controls.append(actions.add(ttk.Button(actions, text="恢复默认样式", command=self.reset_feedback_style)))
         for variable in self.feedback_vars.values():
@@ -356,7 +496,7 @@ class Companion:
             self.loop.call_soon_threadsafe(self.detection_request.set)
 
     def update_inventory_visibility(self, event=None):
-        visible = self.window.state() == "normal" and self.tabs.select() == str(self.detection_page)
+        visible = self.window.state() not in {"withdrawn", "iconic"} and self.tabs.select() == str(self.detection_page)
         if visible and not self.inventory_visible.is_set():
             self.inventory_visible.set()
             self.refresh_detection()
@@ -454,6 +594,9 @@ class Companion:
                 text = payload["text"]
                 self.last_operation.set(text)
                 self.records.insert(0, time.strftime("%H:%M:%S") + "  " + ("" if payload["ok"] else "失败 · ") + text)
+                self.records_empty.place_forget()
+                if not payload["ok"]:
+                    self.records.itemconfigure(0, foreground="#C23B45")
                 if self.records.size() > 100:
                     self.records.delete(100, "end")
                 now = time.monotonic()
@@ -464,6 +607,11 @@ class Companion:
                 self.inventory.delete(*self.inventory.get_children())
                 for row in payload:
                     self.inventory.insert("", "end", text=row.get("installed_name", row["name"]), values=(row["version"], "运行中" if row["running"] else "已安装", row["capabilities"]))
+                if payload:
+                    self.inventory_empty.place_forget()
+                else:
+                    self.inventory_empty.configure(text="暂未发现播放器\n打开哔哩哔哩播放窗口或客户端后，再次检测。")
+                    self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
                 self.inventory_status.set(f"检测到 {len(payload)} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
             elif kind == "show":
                 self.show()

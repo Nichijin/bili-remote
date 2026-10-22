@@ -21,7 +21,7 @@ def fit_window(window):
         ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)
     available_width = max(240, rect.right - rect.left - round(32 * scale))
     available_height = max(200, rect.bottom - rect.top - round(48 * scale))
-    width, height = min(round(740 * scale), available_width), min(round(680 * scale), available_height)
+    width, height = min(round(1040 * scale), available_width), min(round(780 * scale), available_height)
     window.geometry(f"{width}x{height}+{rect.left + max(0, (rect.right - rect.left - width) // 2)}+{rect.top + max(0, (rect.bottom - rect.top - height) // 2)}")
     window.minsize(min(round(440 * scale), available_width), min(round(300 * scale), available_height))
     return scale

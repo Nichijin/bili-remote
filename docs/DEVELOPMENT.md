@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
 
-本页面向维护者。当前项目版本为 **0.5.1**，安卓 `versionCode` 为 **11**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+本页面向维护者。当前项目版本为 **0.5.2**，安卓 `versionCode` 为 **12**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
 
 ## 项目结构
 
@@ -88,9 +88,9 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliGestureRemote`。
 
 若使用本项目本地工具缓存中的编译器，可省略 `--compiler`。脚本默认检查 `.tooling/inno/ISCC.exe`，不会自动安装 Inno Setup。编译前确认使用场景符合构建工具的许可。
 
-构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.1.exe`。普通用户分发安装器即可。
+构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.2.exe`。普通用户分发安装器即可。
 
-分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.1 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
+分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.2 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
 
 安装器固定 AppId，沿用实际旧安装路径，正常退出运行中的程序后替换文件。升级不调用旧卸载器，避免清空数据。保留实际自启和桌面快捷方式状态，原本运行的实例安装后恢复到托盘。支持同版本修复，拒绝较低版本降级。
 
@@ -104,7 +104,7 @@ Android Studio 可以打开 `android/`；Windows 也可使用便携构建脚本�
 .\.venv\Scripts\python.exe scripts/build_apk.py
 ```
 
-脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.1.apk`。无需安装到全局工具路径。
+脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.2.apk`。无需安装到全局工具路径。
 
 **从新克隆的仓库不能直接生成可覆盖现有用户版本的 APK。** 维护者必须先把原签名恢复到 `android/signing/app.keystore`。该私钥不在仓库中；旧项目若仍有 `.tooling/debug.keystore`，脚本会核对证书后复制原密钥。密钥缺失或不匹配时停止，不会静默生成不同身份。
 
@@ -121,13 +121,13 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/smoke_desktop_layout.py
 .\.venv\Scripts\python.exe scripts/smoke_feedback.py
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
-.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.5.0
-.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.1.apk
+.\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.5.1
+.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.2.apk
 ```
 
-遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动、5 挡设置、提示开关保存及连续进度，不代表安卓实机测试。`smoke_desktop_layout.py` 检查 5 组窗口与字体缩放下的页签、按钮换行、底部操作可达和表格滚动，不等同于真实多显示器 DPI 切换测试。
+遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动、5 挡设置、提示开关保存及连续进度，不代表安卓实机测试。`smoke_desktop_layout.py` 检查 7 组窗口与字体缩放下的真实侧栏导航、按钮换行、底部操作可达、表格滚动及新版滑块指针拖动，不等同于真实多显示器 DPI 切换测试。
 
-升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.0 → 0.5.1 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.1 → 0.5.2 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
 
 | 已验证范围 | 当前证据 |
 | --- | --- |
@@ -146,6 +146,8 @@ node --test tests/*.test.cjs
 
 连续进度通过 `status` 获取当前位置、`seek_start` / `seek_end` 和 `media_key`，再发送带小数秒的 `seek_to(position, media_key)`。横向整屏对应 120 秒，发送间隔约 80ms、最多一个未完成请求，快速移动合并为最新位置，松手补发最后位置。下一次拖动在前一次最终请求后读取基准；取消、后台或断线丢弃尚未发送的位置，不回滚已提交进度。网页使用视频元素及媒体源标识，客户端使用会话、范围和媒体属性摘要校验，避免旧拖动落到已变化的视频。客户端缺少媒体信息或时间轴时明确报错。
 
+`desktop/appearance.py` 使用 Tk 内置图像元素绘制圆角按钮、开关、滑块、细滚动条及本地线性图标，卡片与响应式双栏按窗口事件更新；没有浏览器界面内核、运行时图片下载或常驻动画。原生 Windows 标题栏保留最小化、最大化和关闭。
+
 `desktop/layout.py` 负责工作区窗口尺寸、滚动页面、文字换行和按钮行换行；`desktop/assets/app.manifest` 声明 Per Monitor V2，打包脚本嵌入该清单。
 
 `desktop/feedback.py` 负责字幕样式规范化、工作区定位和不激活窗口的显示；`settings.json` 的 `feedback_style` 保存 `x` / `y` 百分比、`font_size`、`color` 和 `opacity`。`show_feedback` 沿用旧版开关字段。设置写入防抖 250ms，关闭程序时提交待保存内容；字幕关闭时释放窗口、开启后按需重新创建，重复操作只保留一个隐藏计时器。`smoke_feedback.py` 用隔离设置验证真实窗口样式、位置、保存、300 次复用与不抢焦点。
@@ -156,7 +158,7 @@ node --test tests/*.test.cjs
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/measure_desktop_memory.py .tooling/upgrade-baseline-0.5.0/BiliRemote-Desktop.exe --output .tooling/memory-0.5.0.json
-.\.venv\Scripts\python.exe scripts/measure_desktop_memory.py dist/BiliRemote-Desktop.exe --output .tooling/memory-0.5.1.json
+.\.venv\Scripts\python.exe scripts/measure_desktop_memory.py dist/BiliRemote-Desktop.exe --output .tooling/memory-0.5.2.json
 ```
 
 ## 分发校验
@@ -167,7 +169,7 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/package_kit.py
 ```
 
-产物是 `dist/bili-remote-kit-0.5.1.zip` 与 `dist/SHA256-0.5.1.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+产物是 `dist/bili-remote-kit-0.5.2.zip` 与 `dist/SHA256-0.5.2.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
 
 整合脚本只接收当前版本的两端安装包；缺少任一文件即停止，不会回退到无版本号文件或把旧版本混入新整合包。修改项目版本后会生成新的文件名，旧版带版本号的产物不会被覆盖。
 

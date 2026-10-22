@@ -22,3 +22,19 @@
 - **小屏与横屏**：缩小圆盘和间距，空间不足时允许纵向滚动，不挤压或重叠按钮。纯黑触摸板继续沿用全屏手势。
 
 设置分组按照本项目已有功能设计，没有添加尚未实现的主题、皮肤、亮度或设备电源选项。
+
+
+## 电脑端 · 0.5.2
+
+查看日期为 2026-10-22，以下为实际打开阅读的 Apple 官方资料。参考信息组织、留白和交互层级，未复制 Apple 图片、SF Symbols、字体或源代码。
+
+| 来源 | 参考的部分 | 本项目的实现 |
+| --- | --- | --- |
+| [Apple：Designing for macOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos) | 可调整窗口、键盘操作、适合桌面的信息密度 | 按 Windows 工作区确定窗口尺寸；连接信息响应式双栏；侧栏支持 Alt+1–4；小窗口可滚动 |
+| [Apple 支持：通过“系统设置”自定义 Mac](https://support.apple.com/zh-cn/guide/mac-help/mh15217/mac) | 侧栏导航、分组设置和清晰的主次关系，页面内含系统设置截图 | 浅灰侧栏、白色分组卡片、蓝色选中态；设置按通用、提示字幕、帮助与管理分组，开关放在每行右侧 |
+
+![电脑端连接与播放页面](images/desktop-main.png)
+
+![电脑端分组设置](images/desktop-settings.png)
+
+使用 Windows 本地字体和原生窗口标题栏，圆角元素、线性图标由本项目绘制。界面仍使用 Tk，没有增加 WebView / Electron、实时模糊或持续动画；手机发现、首次配对和已授权重连流程保留。颜色与文字共同表达真实状态，未连接时不会显示虚构播放内容。

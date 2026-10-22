@@ -4,11 +4,11 @@
 
 ![Bili Remote：传统遥控器与纯黑触摸板界面预览](docs/images/overview.png)
 
-**当前版本：0.5.1** · Windows + Android · 局域网连接 · 无需浏览器扩展
+**当前版本：0.5.2** · Windows + Android · 局域网连接 · 无需浏览器扩展
 
 [下载最新版本与发布说明](https://github.com/Nichijin/bili-remote/releases/latest) · [完整更新日志](CHANGELOG.md) · [查看提交记录](https://github.com/Nichijin/bili-remote/commits/main/)
 
-0.5.1 加入电脑提示字幕的位置、字号、文字颜色、不透明度和开关设置，并降低后台待机内存。保留自定义倍速挡位与触摸板连续拖动。详见[更新记录](CHANGELOG.md)。
+0.5.2 重做电脑端界面：浅灰侧栏、白色分组卡片、蓝色主操作、圆角按钮与滑块开关，宽窄窗口自动调整布局。保留字幕自定义、后台内存优化及现有遥控功能。详见[更新记录](CHANGELOG.md)。
 
 ## 先从这里开始
 
@@ -38,7 +38,7 @@
 
 ![安装两端、同一路由器、首次配对、后续自动重连的四步流程](docs/images/connection-flow.png)
 
-1. 电脑安装 `BiliRemote-Setup-0.5.1.exe`，手机安装 `bili-remote-0.5.1.apk`。电脑无需安装 Python。
+1. 电脑安装 `BiliRemote-Setup-0.5.2.exe`，手机安装 `bili-remote-0.5.2.apk`。电脑无需安装 Python。
 2. 两端接入同一路由器；电脑接网线、手机连 WiFi 也可以。打开电脑软件。
 3. 手机自动发现电脑，首次输入电脑端显示的 **6 位配对码**。
 4. 在电脑软件点击 **“打开哔哩哔哩 · 无需扩展”**，或在手机 **“设置 → 播放器 → 在电脑打开哔哩哔哩”** 中主动打开播放窗口，再选一个视频。
@@ -46,7 +46,7 @@
 
 安装包可从 [Releases 发布页](https://github.com/Nichijin/bili-remote/releases/latest)下载，普通使用只需上面两个文件。其余文件的用途见[安装包说明](docs/FAQ.md)。源码构建输出位于 `dist/`；GitHub 自动生成的 Source code 源码包不包含安装包。
 
-安装包、整合包和校验文件均带版本号，以上以 0.5.1 为例；后续构建会自动使用项目的新版本号。
+安装包、整合包和校验文件均带版本号，以上以 0.5.2 为例；后续构建会自动使用项目的新版本号。
 
 详细步骤与连接界面见[快速上手](docs/QUICK_START.md)。
 
