@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 from ctypes import wintypes
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -146,6 +147,11 @@ def capture_window(window, path):
     """Capture only this window's client pixels; never capture the user's screen."""
     window.update_idletasks()
     window.update()
+    # Capture a settled page, including native composition and its short fade.
+    deadline = time.monotonic() + .25
+    while time.monotonic() < deadline:
+        window.update()
+        time.sleep(.005)
     user, gdi = ctypes.windll.user32, ctypes.windll.gdi32
     user.GetParent.argtypes, user.GetParent.restype = [wintypes.HWND], wintypes.HWND
     handle = user.GetParent(window.winfo_id()) or window.winfo_id()

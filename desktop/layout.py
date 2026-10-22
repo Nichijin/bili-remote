@@ -3,7 +3,10 @@ import contextlib
 import ctypes
 from ctypes import wintypes
 import tkinter as tk
+import time
 from tkinter import ttk
+
+from .rendering import PageCompositor
 
 
 def enable_dpi_awareness():
@@ -84,6 +87,8 @@ class CachedPages(ttk.Frame):
 
     Unmapping a Notebook page recursively remapped every Windows child control
     on return. Keeping pages mapped avoids that work and retains scroll state.
+    Windows retains complete page surfaces. All pages follow the window size
+    before navigation, and transitions change only opacity, never layout/input.
     Only the active page participates in keyboard traversal.
     """
     def __init__(self, parent):
@@ -93,7 +98,18 @@ class CachedPages(ttk.Frame):
         self.focus_command = self.register(self.allow_focus)
         self.page_sizes = {}
         self.current_size = None
+        self.compositor = None
+        self.transition_timer = None
+        self.transition_page = None
+        self.layout_timer = None
+        self.scheduler = self.winfo_toplevel()
+        # An opaque neutral background prevents the old page showing through
+        # the new one's short fade. It never covers the active live controls.
+        self.backdrop = ttk.Frame(self, takefocus=False)
+        self.backdrop.place(x=0, y=0, relwidth=1, relheight=1)
         self.bind("<Configure>", self.resize)
+        self.bind("<Destroy>", self.on_destroy, add=True)
+        self.unmap_binding = self.scheduler.bind("<Unmap>", self.on_unmap, add=True)
 
     def add(self, page, text=None):
         self.pages.append(page)
@@ -109,10 +125,22 @@ class CachedPages(ttk.Frame):
         size = max(1, event.width), max(1, event.height)
         if size == self.current_size:
             return
-        initial = self.current_size is None
+        self.finish_transition()
+        if self.compositor:
+            self.compositor.pause_layout()
         self.current_size = size
-        for index in range(len(self.pages)) if initial else (self.selected,):
+        for index in range(len(self.pages)):
             self.size_page(index, size)
+        if self.layout_timer is not None:
+            self.scheduler.after_cancel(self.layout_timer)
+        self.layout_timer = self.scheduler.after_idle(self.finish_layout)
+
+    def finish_layout(self):
+        if self.layout_timer is not None:
+            self.scheduler.after_cancel(self.layout_timer)
+            self.layout_timer = None
+        if self.compositor:
+            self.compositor.resume_layout()
 
     def prepare(self):
         def walk(widget):
@@ -125,6 +153,48 @@ class CachedPages(ttk.Frame):
                     original = widget.cget("takefocus")
                     if str(original) != "0":
                         widget.configure(takefocus=(self.focus_command, index, original))
+        self.compositor = PageCompositor(self.pages)
+
+    def finish_transition(self):
+        if self.transition_timer is not None:
+            self.scheduler.after_cancel(self.transition_timer)
+            self.transition_timer = None
+        if self.transition_page is not None:
+            self.compositor.opacity(self.transition_page, 255)
+            self.transition_page = None
+
+    def transition(self, page):
+        if not self.compositor or not self.compositor.animate or not self.winfo_ismapped():
+            return
+        self.transition_page = page
+        self.transition_started = time.perf_counter()
+        self.animate_frame()
+
+    def animate_frame(self):
+        self.transition_timer = None
+        elapsed = (time.perf_counter() - self.transition_started) / .14
+        if elapsed >= 1:
+            self.finish_transition()
+            return
+        # Ease out, starting at 90% opacity: the entire page is already usable.
+        alpha = round(230 + 25 * (1 - (1 - elapsed) ** 3))
+        if not self.compositor.opacity(self.transition_page, alpha):
+            self.finish_transition()
+            return
+        self.transition_timer = self.scheduler.after(16, self.animate_frame)
+
+    def on_unmap(self, event):
+        if event.widget is self.scheduler:
+            self.finish_transition()
+            self.finish_layout()
+
+    def on_destroy(self, event):
+        if event.widget is self:
+            self.finish_transition()
+            self.finish_layout()
+            if self.compositor:
+                self.compositor.close()
+            self.scheduler.unbind("<Unmap>", self.unmap_binding)
 
     def allow_focus(self, index, original, widget):
         if int(index) != self.selected:
@@ -148,14 +218,16 @@ class CachedPages(ttk.Frame):
         index = self.index(page)
         if index == self.selected:
             return
+        self.finish_transition()
+        self.finish_layout()
         previous = self.selected
         focused = self.focus_get()
         ancestor = focused
         while ancestor is not None and ancestor is not self.pages[previous]:
             ancestor = getattr(ancestor, "master", None)
         self.selected = index
-        if self.current_size:
-            self.size_page(index, self.current_size)
+        self.backdrop.tkraise()
+        self.transition(self.pages[index])
         self.pages[index].tkraise()
         if ancestor is not None:
             self.focus_set()

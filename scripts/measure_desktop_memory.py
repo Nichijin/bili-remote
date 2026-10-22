@@ -19,7 +19,7 @@ import psutil
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def measure(executable, repeats=3):
+def measure(executable, repeats=3, visible=False):
     runs = []
     for _ in range(repeats):
         with tempfile.TemporaryDirectory(prefix="bili-memory-") as directory:
@@ -30,7 +30,7 @@ def measure(executable, repeats=3):
             env = {**os.environ, "BILI_REMOTE_INSTANCE_NAME": identity, "BILI_REMOTE_WINDOW_TITLE": identity,
                    "BILI_REMOTE_DATA_DIR": directory, "BILI_REMOTE_BIND_HOST": "127.0.0.1",
                    "BILI_REMOTE_PORT": str(port), "BILI_REMOTE_DISCOVERY_PORT": "0"}
-            process = subprocess.Popen([str(executable), "--background"], env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            process = subprocess.Popen([str(executable), *([] if visible else ["--background"])], env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
@@ -58,7 +58,7 @@ def measure(executable, repeats=3):
                 if process.poll() is None:
                     subprocess.run([str(executable), "--quit"], env=env, creationflags=subprocess.CREATE_NO_WINDOW, timeout=15, check=True)
                     process.wait(timeout=15)
-    return {"executable": str(executable), "scenario": "background, service online, no phone or player",
+    return {"executable": str(executable), "scenario": ("visible main page" if visible else "background") + ", service online, no phone or player",
             "working_set_mib": round(statistics.median(run["working_set_mib"] for run in runs), 3),
             "private_bytes_mib": round(statistics.median(run["private_bytes_mib"] for run in runs), 3), "runs": runs}
 
@@ -68,10 +68,11 @@ def main():
     parser.add_argument("executable", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--visible", action="store_true", help="measure retained page surfaces with the main window visible")
     args = parser.parse_args()
     if not 1 <= args.repeats <= 5:
         parser.error("repeats must be between 1 and 5")
-    report = measure(args.executable.resolve(), args.repeats)
+    report = measure(args.executable.resolve(), args.repeats, args.visible)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2), flush=True)

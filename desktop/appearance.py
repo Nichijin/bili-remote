@@ -1,4 +1,4 @@
-"""Small, local Tk assets and a quiet desktop theme; no web engine or animation."""
+"""Small local Tk assets and a quiet desktop theme, without a web engine."""
 import math
 import tkinter as tk
 from tkinter import font, ttk

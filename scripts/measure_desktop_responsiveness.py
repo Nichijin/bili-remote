@@ -35,7 +35,7 @@ def main():
         def start(self):
             self.status.set("电脑已在线，正在广播；等待手机连接。")
             self.addresses.set("PERFORMANCE-PREVIEW · 192.168.1.10")
-    timings = []
+    timings, animation, first_action = [], [], []
     with tempfile.TemporaryDirectory(prefix="bili-responsiveness-") as directory:
         with patch.dict(os.environ, {"BILI_REMOTE_DATA_DIR": directory}), patch("desktop.gui.startup_enabled", return_value=False):
             startup = time.perf_counter()
@@ -45,6 +45,16 @@ def main():
             app.window.deiconify()
             app.window.update()
             startup_ms = (time.perf_counter() - startup) * 1000
+            def walk(widget):
+                yield widget
+                for child in widget.winfo_children():
+                    yield from walk(child)
+            switch = next(w for w in walk(app.tabs.pages[3]) if isinstance(w, ttk.Checkbutton)
+                          and str(w.cget("variable")) == str(app.close_to_tray))
+            def settle_transition():
+                while getattr(app.tabs, "transition_timer", None) is not None:
+                    app.window.update()
+                    time.sleep(.001)
             profiler = cProfile.Profile()
             profiler.enable()
             for iteration in range(args.rounds):
@@ -54,6 +64,15 @@ def main():
                     app.window.update()
                     elapsed = (time.perf_counter() - started) * 1000
                     timings.append({"round": iteration + 1, "tab": tab, "milliseconds": round(elapsed, 3)})
+                    if tab == 3:
+                        previous = app.close_to_tray.get()
+                        switch.event_generate("<ButtonPress-1>", x=8, y=8)
+                        switch.event_generate("<ButtonRelease-1>", x=8, y=8)
+                        app.window.update()
+                        assert app.close_to_tray.get() != previous, "First settings input was ignored"
+                        first_action.append((time.perf_counter() - started) * 1000)
+                    settle_transition()
+                    animation.append((time.perf_counter() - started) * 1000)
                     print(f"round {iteration + 1}, tab {tab}: {elapsed:.1f} ms", flush=True)
             app.tabs.select(3)
             app.window.update()
@@ -89,9 +108,12 @@ def main():
             samples = [entry["milliseconds"] for entry in timings]
             def summary(values):
                 return {"median_ms": round(statistics.median(values), 3), "p95_ms": round(sorted(values)[max(0, int(len(values) * .95) - 1)], 3), "max_ms": round(max(values), 3)}
-            report = {"scenario": "isolated source UI, no network or detection; button invoke plus Tk update",
+            report = {"scenario": "isolated source UI, no network or detection; button invoke plus Tk update; wait for any transition between samples",
                       "window": "1040x780", "ui_scale": app.ui_scale, "ui_startup_ms": round(startup_ms, 3),
-                      "switches": timings, **summary(samples), "slider_drag": summary(drag), "window_resize": summary(resize), "resize_samples": resize_samples}
+                      "switches": timings, **summary(samples), "first_settings_action": summary(first_action),
+                      "transition_complete": summary(animation),
+                      "native_page_surfaces": bool(getattr(getattr(app.tabs, "compositor", None), "surfaces", {})),
+                      "slider_drag": summary(drag), "window_resize": summary(resize), "resize_samples": resize_samples}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
             print(json.dumps({key: value for key, value in report.items() if key not in {"switches", "resize_samples"}}), flush=True)
