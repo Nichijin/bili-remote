@@ -20,7 +20,7 @@ from .appearance import BLUE, LINE, MUTED, SIDEBAR, SURFACE, TEXT, Card, Columns
 from .detection import ClientDetector, combine
 from .discovery import start_discovery
 from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
-from .layout import FlowRow, ScrollablePage, enable_dpi_awareness, fit_window, wrapped_label
+from .layout import CachedPages, FlowRow, ScrollablePage, enable_dpi_awareness, fit_window, wrapped_label
 from .pairing import PairingCode
 from .server import Relay
 from .trust import TrustStore
@@ -57,7 +57,7 @@ class Companion:
             except OSError as exc:
                 logging.warning("桌面提示或托盘不可用：%s", exc)
         self.window.protocol("WM_DELETE_WINDOW", self.on_close_window)
-        self.window.after(200, self.poll)
+        self.window.after(50, self.poll)
         self.start()
         if background:
             self.minimize()
@@ -66,6 +66,7 @@ class Companion:
         self.font_family = apply_theme(self.window, self.ui_scale)
         self.compact_navigation = None
         self.short_navigation = None
+        self.active_navigation = None
         self.shell = ttk.Frame(self.window)
         self.shell.pack(fill="both", expand=True)
         self.sidebar = ttk.Frame(self.shell, style="Sidebar.TFrame")
@@ -85,7 +86,7 @@ class Companion:
         ttk.Label(self.brand_text, text="哔哩哔哩手势遥控", style="Sidebar.Caption.TLabel").pack(anchor="w", pady=(self.px(3), 0))
         self.nav_heading = ttk.Label(self.sidebar, text="工作空间", style="Sidebar.Caption.TLabel")
         self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)))
-        tabs = ttk.Notebook(self.shell, style="Pages.TNotebook", takefocus=False)
+        tabs = CachedPages(self.shell)
         tabs.pack(side="left", fill="both", expand=True)
         remote_page, detection, options_page, records = [ttk.Frame(tabs) for _ in range(4)]
         for widget, name in ((remote_page, "连接与播放"), (detection, "客户端与版本"), (records, "操作记录"), (options_page, "设置")):
@@ -209,6 +210,7 @@ class Companion:
         management.pack(fill="x")
         for label, action, style in (("打开使用说明", self.open_help, "TButton"), ("卸载 / 清理本机数据", self.uninstall, "Danger.TButton"), ("完全退出", self.close, "TButton")):
             management.add(ttk.Button(management, text=label, command=action, style=style))
+        tabs.prepare()
         self.refresh_pin_label()
         self.resize_navigation()
         self.on_page_changed()
@@ -263,9 +265,13 @@ class Companion:
 
     def on_page_changed(self, event=None):
         current = self.tabs.index(self.tabs.select())
-        for index, (button, name) in enumerate(self.navigation):
+        if current == self.active_navigation:
+            return
+        for index in {self.active_navigation, current} - {None}:
+            button, name = self.navigation[index]
             selected = index == current
             button.configure(style="Selected.Nav.TButton" if selected else "Nav.TButton", image=self.nav_icons[index][int(selected)])
+        self.active_navigation = current
         self.update_inventory_visibility()
 
     def update_service_presentation(self, *args):
@@ -285,7 +291,9 @@ class Companion:
 
     def refresh_pin_label(self):
         code = self.pairing.current()
-        self.pin_text.set(code[:3] + " " + code[3:])
+        formatted = code[:3] + " " + code[3:]
+        if formatted != self.pin_text.get():
+            self.pin_text.set(formatted)
 
     def build_feedback_settings(self, parent):
         frame = ttk.Frame(parent, style="Surface.TFrame")
@@ -335,9 +343,13 @@ class Companion:
     def update_feedback_labels(self):
         for key, caption in self.feedback_readouts.items():
             value = self.feedback_style[key]
-            caption.set(f"{'水平位置' if key == 'x' else '垂直位置' if key == 'y' else '不透明度'}  {value}%")
+            text = f"{'水平位置' if key == 'x' else '垂直位置' if key == 'y' else '不透明度'}  {value}%"
+            if caption.get() != text:
+                caption.set(text)
         pair = self.feedback_style["x"], self.feedback_style["y"]
-        self.feedback_position.set(next((name for name, position in self.feedback_positions.items() if position == pair), "自定义"))
+        position = next((name for name, position in self.feedback_positions.items() if position == pair), "自定义")
+        if self.feedback_position.get() != position:
+            self.feedback_position.set(position)
 
     def feedback_style_edited(self, *args):
         values = dict(self.feedback_style)
@@ -349,6 +361,8 @@ class Companion:
         normalized = normalize_style(values)
         if normalized["color"] != str(values["color"]).upper():
             return  # Preserve the last valid color while the hex field is typed.
+        if normalized == self.feedback_style:
+            return
         self.feedback_style = normalized
         self.update_feedback_labels()
         if self.overlay:
@@ -496,6 +510,8 @@ class Companion:
             self.loop.call_soon_threadsafe(self.detection_request.set)
 
     def update_inventory_visibility(self, event=None):
+        if event is not None and event.widget is not self.window:
+            return
         visible = self.window.state() not in {"withdrawn", "iconic"} and self.tabs.select() == str(self.detection_page)
         if visible and not self.inventory_visible.is_set():
             self.inventory_visible.set()
@@ -584,25 +600,16 @@ class Companion:
 
     def poll(self):
         self.refresh_pin_label()
-        while not self.events.empty():
+        deadline, handled, operations = time.monotonic() + .008, 0, []
+        while handled < 32 and time.monotonic() < deadline and not self.events.empty():
             kind, payload = self.events.get_nowait()
+            handled += 1
             if kind in {"status", "error"}:
                 self.status.set(payload)
             elif kind == "addresses":
                 self.addresses.set(payload)
             elif kind == "operation":
-                text = payload["text"]
-                self.last_operation.set(text)
-                self.records.insert(0, time.strftime("%H:%M:%S") + "  " + ("" if payload["ok"] else "失败 · ") + text)
-                self.records_empty.place_forget()
-                if not payload["ok"]:
-                    self.records.itemconfigure(0, foreground="#C23B45")
-                if self.records.size() > 100:
-                    self.records.delete(100, "end")
-                now = time.monotonic()
-                if not self.hidden and self.show_feedback.get() and (payload.get("cmd") not in {"volume", "seek_to"} or now - self.last_overlay_time > .15):
-                    self.show_overlay(text, payload["ok"])
-                    self.last_overlay_time = now
+                operations.append(payload)
             elif kind == "inventory":
                 self.inventory.delete(*self.inventory.get_children())
                 for row in payload:
@@ -621,6 +628,8 @@ class Companion:
                 self.toggle.config(text="启动服务")
                 if not self.status.get().startswith("服务启动失败"):
                     self.status.set("服务已停止")
+        if operations:
+            self.display_operations(operations)
         if self.closing and (not self.thread or not self.thread.is_alive()):
             if self.overlay:
                 self.overlay.close()
@@ -628,7 +637,30 @@ class Companion:
                 self.tray.close()
             self.window.destroy()
             return
-        self.window.after(200, self.poll)
+        self.window.after(16 if not self.events.empty() else 50, self.poll)
+
+    def display_operations(self, operations):
+        text = operations[-1]["text"]
+        if self.last_operation.get() != text:
+            self.last_operation.set(text)
+        newest = list(reversed(operations))
+        timestamp = time.strftime("%H:%M:%S")
+        lines = [timestamp + "  " + ("" if event["ok"] else "失败 · ") + event["text"] for event in newest]
+        self.records.insert(0, *lines)
+        for index, event in enumerate(newest):
+            if not event["ok"]:
+                self.records.itemconfigure(index, foreground="#C23B45")
+        if self.records.size() > 100:
+            self.records.delete(100, "end")
+        if self.records_empty.winfo_manager():
+            self.records_empty.place_forget()
+        # Keep every log entry, but paint the latest meaningful overlay once.
+        # An error or discrete action takes precedence over coalesced scrubbing.
+        feedback = next((event for event in newest if not event["ok"] or event.get("cmd") not in {"volume", "seek_to"}), newest[0])
+        now = time.monotonic()
+        if not self.hidden and self.show_feedback.get() and (feedback.get("cmd") not in {"volume", "seek_to"} or now - self.last_overlay_time > .15):
+            self.show_overlay(feedback["text"], feedback["ok"])
+            self.last_overlay_time = now
 
     def close(self):
         if self.feedback_save_timer:

@@ -66,12 +66,15 @@ def apply_theme(window, scale):
         ("Selected.Nav.TButton", "#DFEAFA", "#D5E5FB", "#C8DDF9", "#0065D5", "#DFEAFA"),
         ("Danger.TButton", SURFACE, "#FFF0F0", "#FFE0E0", "#C23B45", LINE),
     ):
-        images = [_rounded_image(window, (edge * 2 + 2, edge * 2 + 2), edge, c, border if c == normal else c)
+        # Tk tiles image centers rather than stretching them. A 2x2 center
+        # caused thousands of GDI copies on Windows during every page repaint.
+        images = [_rounded_image(window, (edge * 2 + 48, edge * 2 + 48), edge, c, border if c == normal else c)
                   for c in (normal, hover, pressed, "#ECEEF2")]
         window.theme_images.extend(images)
         element = name + ".surface"
         style.element_create(element, "image", images[0], ("disabled", images[3]),
-                             ("pressed", images[2]), ("active", images[1]), border=edge, padding=0, sticky="nsew")
+                             ("pressed", images[2]), ("active", images[1]), border=edge, padding=0,
+                             width=edge * 2, height=edge * 2, sticky="nsew")
         style.layout(name, [(element, {"sticky": "nsew", "children": [
             ("Button.focus", {"sticky": "nsew", "children": [("Button.padding", {"sticky": "nsew", "children": [
                 ("Button.label", {"sticky": "nsew"})]})]})]})])
@@ -98,12 +101,12 @@ def apply_theme(window, scale):
         style.map(name, fieldbackground=[("readonly", SURFACE)], bordercolor=[("focus", BLUE)])
     style.configure("Horizontal.TScale", background=SURFACE, troughcolor="#E8EDF4", borderwidth=0,
                     sliderwidth=round(14 * scale), sliderlength=round(18 * scale))
-    track = _rounded_image(window, (12, max(4, round(4 * scale))), 2, "#E5EAF1")
+    track = _rounded_image(window, (256, max(4, round(4 * scale))), 2, "#E5EAF1")
     thumb_size = round(19 * scale)
     thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, SURFACE, "#9FAEC4")
     disabled_thumb = _rounded_image(window, (thumb_size, thumb_size), thumb_size / 2, "#F3F4F6", "#D8DCE3")
     window.theme_images.extend((track, thumb, disabled_thumb))
-    style.element_create("Soft.Horizontal.Scale.trough", "image", track, border=2, padding=0, sticky="we")
+    style.element_create("Soft.Horizontal.Scale.trough", "image", track, border=2, padding=0, width=12, sticky="we")
     style.element_create("Soft.Horizontal.Scale.slider", "image", thumb, ("disabled", disabled_thumb), padding=0)
     style.layout("Horizontal.TScale", [("Soft.Horizontal.Scale.trough", {"sticky": "we", "children": [
         ("Soft.Horizontal.Scale.slider", {"side": "left", "sticky": ""})]})])
@@ -116,11 +119,12 @@ def apply_theme(window, scale):
                     arrowsize=round(11 * scale), lightcolor=BG, darkcolor=BG, bordercolor=BG)
     for direction in ("Vertical", "Horizontal"):
         vertical = direction == "Vertical"
-        size = (max(6, round(6 * scale)), 12) if vertical else (12, max(6, round(6 * scale)))
+        size = (max(6, round(6 * scale)), 128) if vertical else (128, max(6, round(6 * scale)))
         image = _rounded_image(window, size, 3, "#C7CDD7")
         window.theme_images.append(image)
         name = f"Soft.{direction}.Scrollbar.thumb"
-        style.element_create(name, "image", image, border=3, padding=0, sticky="ns" if vertical else "we")
+        style.element_create(name, "image", image, border=3, padding=0,
+                             **({"height": 12} if vertical else {"width": 12}), sticky="ns" if vertical else "we")
         style.layout(f"{direction}.TScrollbar", [(f"{direction}.Scrollbar.trough", {"sticky": "ns" if vertical else "we", "children": [
             (name, {"sticky": "nsew"})]})])
     return family
@@ -140,6 +144,7 @@ class Card(ttk.Frame):
         self.inset = round(padding * scale)
         self.radius = round(16 * scale)
         self.stretch = stretch
+        self.drawn_size = None
         self.canvas = tk.Canvas(self, background=BG, highlightthickness=0, borderwidth=0, height=1)
         self.canvas.pack(fill="both", expand=True)
         self.content = ttk.Frame(self.canvas, style="Surface.TFrame")
@@ -159,8 +164,11 @@ class Card(ttk.Frame):
         changed = {key: value for key, value in options.items() if round(float(self.canvas.itemcget(self.item, key))) != value}
         if changed:
             self.canvas.itemconfigure(self.item, **changed)
-        self.canvas.delete("outline")
         height = max(1, self.canvas.winfo_height())
+        if self.drawn_size == (width, height):
+            return
+        self.drawn_size = width, height
+        self.canvas.delete("outline")
         rounded_rect(self.canvas, 1, 1, max(2, width - 1), max(2, height - 2), self.radius,
                      fill=SURFACE, outline=LINE, width=1, tags="outline")
         self.canvas.tag_lower("outline")
@@ -238,8 +246,10 @@ def tooltip(widget, text):
             widget.after_cancel(state["timer"])
             state["timer"] = None
         if state["window"]:
-            state["window"].destroy()
+            popup = state["window"]
             state["window"] = None
+            if popup.winfo_exists():
+                popup.destroy()
     def show():
         state["timer"] = None
         if not widget.winfo_ismapped():
@@ -253,6 +263,7 @@ def tooltip(widget, text):
         popup.geometry(f"+{widget.winfo_rootx() + widget.winfo_width() + 7}+{widget.winfo_rooty() + 3}")
         popup.deiconify()
         state["window"] = popup
+        popup.bind("<Destroy>", lambda event: state.update(window=None) if event.widget is popup else None)
     def schedule(event=None):
         hide()
         state["timer"] = widget.after(600, show)

@@ -79,6 +79,89 @@ class FlowRow(ttk.Frame):
             widget.grid(row=row, column=column, sticky="w", padx=(0, 8), pady=4)
 
 
+class CachedPages(ttk.Frame):
+    """Keep each page laid out behind the current page; only change its z-order.
+
+    Unmapping a Notebook page recursively remapped every Windows child control
+    on return. Keeping pages mapped avoids that work and retains scroll state.
+    Only the active page participates in keyboard traversal.
+    """
+    def __init__(self, parent):
+        super().__init__(parent, takefocus=False)
+        self.pages = []
+        self.selected = 0
+        self.focus_command = self.register(self.allow_focus)
+        self.page_sizes = {}
+        self.current_size = None
+        self.bind("<Configure>", self.resize)
+
+    def add(self, page, text=None):
+        self.pages.append(page)
+        page.place(x=0, y=0, width=1, height=1)
+        self.pages[self.selected].tkraise()
+
+    def size_page(self, index, size):
+        if self.page_sizes.get(index) != size:
+            self.page_sizes[index] = size
+            self.pages[index].place_configure(width=size[0], height=size[1])
+
+    def resize(self, event):
+        size = max(1, event.width), max(1, event.height)
+        if size == self.current_size:
+            return
+        initial = self.current_size is None
+        self.current_size = size
+        for index in range(len(self.pages)) if initial else (self.selected,):
+            self.size_page(index, size)
+
+    def prepare(self):
+        def walk(widget):
+            yield widget
+            for child in widget.winfo_children():
+                yield from walk(child)
+        for index, page in enumerate(self.pages):
+            for widget in walk(page):
+                if "takefocus" in widget.keys():
+                    original = widget.cget("takefocus")
+                    if str(original) != "0":
+                        widget.configure(takefocus=(self.focus_command, index, original))
+
+    def allow_focus(self, index, original, widget):
+        if int(index) != self.selected:
+            return "0"
+        if original in ("", "0", "1"):
+            return original
+        return self.tk.call(*self.tk.splitlist(original), widget)
+
+    def index(self, page):
+        if isinstance(page, int) or str(page).isdigit():
+            index = int(page)
+        else:
+            index = next((i for i, widget in enumerate(self.pages) if str(widget) == str(page)), -1)
+        if not 0 <= index < len(self.pages):
+            raise tk.TclError(f"Unknown page: {page}")
+        return index
+
+    def select(self, page=None):
+        if page is None:
+            return str(self.pages[self.selected])
+        index = self.index(page)
+        if index == self.selected:
+            return
+        previous = self.selected
+        focused = self.focus_get()
+        ancestor = focused
+        while ancestor is not None and ancestor is not self.pages[previous]:
+            ancestor = getattr(ancestor, "master", None)
+        self.selected = index
+        if self.current_size:
+            self.size_page(index, self.current_size)
+        self.pages[index].tkraise()
+        if ancestor is not None:
+            self.focus_set()
+        self.event_generate("<<NotebookTabChanged>>")
+
+
 class ScrollablePage(ttk.Frame):
     def __init__(self, parent, padding=16):
         super().__init__(parent)
@@ -92,11 +175,24 @@ class ScrollablePage(ttk.Frame):
         self.scrollbar.grid(row=0, column=1, sticky="ns")
         self.content = ttk.Frame(self.canvas, padding=padding)
         self.item = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
-        self.canvas.bind("<Configure>", lambda event: self.canvas.itemconfigure(self.item, width=max(1, event.width)))
-        self.content.bind("<Configure>", lambda event: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.content_width = self.scroll_region = None
+        self.canvas.bind("<Configure>", self.resize)
+        self.content.bind("<Configure>", self.update_scroll_region)
         self.winfo_toplevel().bind("<MouseWheel>", self.wheel, add=True)
         self.canvas.bind("<Next>", lambda event: self.canvas.yview_scroll(1, "pages"))
         self.canvas.bind("<Prior>", lambda event: self.canvas.yview_scroll(-1, "pages"))
+
+    def resize(self, event):
+        width = max(1, event.width)
+        if width != self.content_width:
+            self.content_width = width
+            self.canvas.itemconfigure(self.item, width=width)
+
+    def update_scroll_region(self, event=None):
+        region = self.canvas.bbox("all")
+        if region != self.scroll_region:
+            self.scroll_region = region
+            self.canvas.configure(scrollregion=region)
 
     def wheel(self, event):
         if not event.delta:

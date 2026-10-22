@@ -74,7 +74,15 @@ def jdk():
 
 
 def command(arguments, environment=None, cwd=None):
-    subprocess.run([str(a) for a in arguments], check=True, env=environment, cwd=cwd)
+    arguments = [str(a) for a in arguments]
+    executable = Path(arguments[0]).name.lower()
+    # This app has a small Java source set. Avoid JDK defaults reserving several
+    # GiB and dozens of GC/compiler threads on a busy development workstation.
+    if executable == "java.exe":
+        arguments[1:1] = ["-Xms16m", "-Xmx256m", "-XX:ActiveProcessorCount=2"]
+    elif executable == "javac.exe":
+        arguments[1:1] = ["-J-Xms16m", "-J-Xmx256m", "-J-XX:ActiveProcessorCount=2"]
+    subprocess.run(arguments, check=True, env=environment, cwd=cwd)
 
 
 def main():
