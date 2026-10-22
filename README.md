@@ -6,6 +6,8 @@
 
 **当前版本：0.5.0** · Windows + Android · 局域网连接 · 无需浏览器扩展
 
+[下载最新版本与发布说明](https://github.com/Nichijin/bili-remote/releases/latest) · [完整更新日志](CHANGELOG.md) · [查看提交记录](https://github.com/Nichijin/bili-remote/commits/main/)
+
 0.5.0 支持 PC 小窗口与高 DPI、自定义最多 5 个倍速挡位、关闭手机操作提示，以及触摸板连续拖动进度。详见[更新记录](CHANGELOG.md)。
 
 ## 先从这里开始
@@ -42,7 +44,7 @@
 4. 在电脑软件点击 **“打开哔哩哔哩 · 无需扩展”**，或在手机 **“设置 → 播放器 → 在电脑打开哔哩哔哩”** 中主动打开播放窗口，再选一个视频。
 5. 手机开始遥控。后续保留授权，电脑在线时可自动重连。
 
-安装包由维护者提供，构建输出位于 `dist/`；Git 源码下载包不包含安装包。已有构建文件时只需要上面两个文件，其余文件的用途见[安装包说明](docs/FAQ.md)。
+安装包可从 [Releases 发布页](https://github.com/Nichijin/bili-remote/releases/latest)下载，普通使用只需上面两个文件。其余文件的用途见[安装包说明](docs/FAQ.md)。源码构建输出位于 `dist/`；GitHub 自动生成的 Source code 源码包不包含安装包。
 
 安装包、整合包和校验文件均带版本号，以上以 0.5.0 为例；后续构建会自动使用项目的新版本号。
 
