@@ -6,16 +6,18 @@ import sys
 
 
 class PageCompositor:
-    """Let Windows retain the complete child page instead of repainting on raise.
+    """Retain a live contents/page window instead of repainting on every move.
 
+    Containers with retained contents can move without another page texture.
     No screenshots, additional windows, render thread or runtime dependencies.
     If child layering is unavailable, restore the original styles and let Tk
     continue to draw the same live controls normally.
     """
     LAYERED = 0x80000
 
-    def __init__(self, pages):
+    def __init__(self, pages, layered_pages=None):
         self.surfaces = {}
+        self.retained = set()
         self.user = None
         self.animate = False
         self.paused = set()
@@ -45,13 +47,16 @@ class PageCompositor:
             user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
             user.SetWindowPos.restype = wintypes.BOOL
             self.user = user
+            layers = set(pages if layered_pages is None else layered_pages)
             for page in pages:
                 handle = page.winfo_id()
                 style = self.get_style(handle, -20)
                 self.surfaces[page] = handle, style
-                self.set_style(handle, -20, style | self.LAYERED)
-                if not self.opacity(page, 255):
-                    raise OSError("Child page composition unavailable")
+                if page in layers:
+                    self.retained.add(handle)
+                    self.set_style(handle, -20, style | self.LAYERED)
+                    if not self.opacity(page, 255):
+                        raise OSError("Child page composition unavailable")
             enabled = wintypes.BOOL()
             self.animate = bool(user.SystemParametersInfoW(0x1042, 0, ctypes.byref(enabled), 0) and enabled.value)
             with contextlib.suppress(OSError, AttributeError):
@@ -63,7 +68,9 @@ class PageCompositor:
 
     def opacity(self, page, alpha):
         surface = self.surfaces.get(page)
-        return bool(surface and self.user.SetLayeredWindowAttributes(surface[0], 0, alpha, 2))
+        if not surface:
+            return False
+        return alpha == 255 if surface[0] not in self.retained else bool(self.user.SetLayeredWindowAttributes(surface[0], 0, alpha, 2))
 
     def move(self, page, y):
         surface = self.surfaces.get(page)
@@ -105,4 +112,5 @@ class PageCompositor:
             with contextlib.suppress(OSError):
                 self.set_style(handle, -20, style)
         self.surfaces.clear()
+        self.retained.clear()
         self.animate = False

@@ -50,6 +50,22 @@ def main():
             app.window.geometry("1230x780")
             app.window.deiconify()
             app.window.update()
+            app.window.focus_force()
+            first, second = app.navigation[0][0], app.navigation[1][0]
+            first.event_generate("<ButtonPress-1>", x=12, y=12)
+            first.event_generate("<ButtonRelease-1>", x=12, y=12)
+            app.window.update()
+            assert first.itemcget(first.focus_item, "state") == "hidden", "Mouse click left a focus border"
+            second.focus_set()
+            app.window.update()
+            assert second.itemcget(second.focus_item, "state") == "normal", "Keyboard focus became invisible"
+            second.event_generate("<Return>")
+            app.window.update()
+            assert app.tabs.selected == 1
+            app.tabs.finish_transition()
+            app.tabs.select(0)
+            app.tabs.finish_transition()
+            app.window.update()
             app.tabs.compositor.animate = True
             app.tabs.transition_observer = observe
             image_count = len(app.window.tk.splitlist(app.window.tk.call("image", "names")))
@@ -145,6 +161,7 @@ def main():
                       "pressed_control_stays_under_pointer": True, "precision_timer_released_when_idle": True,
                       "forward_backward_slide": True, "reverse_without_snapping": True,
                       "no_per_frame_images_or_control_recreation": True, "resize_hide_and_reduced_motion_cleanup": True}
+            report["mouse_and_keyboard_focus_distinguished"] = True
         finally:
             app.tabs.transition_observer = original
             app.tabs.compositor.animate = True

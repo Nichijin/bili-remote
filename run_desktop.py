@@ -12,7 +12,7 @@ if __name__ == "__main__":
         from desktop.server import ASSETS
         import tkinter as tk
         from tkinter import ttk
-        from desktop.layout import CachedPages
+        from desktop.layout import CachedPages, ScrollablePage
         async def check():
             result = await NativeController().discover()
             result["audio_count"] = len(AudioUtilities.GetAllSessions())
@@ -21,11 +21,18 @@ if __name__ == "__main__":
             window.withdraw()
             pages = CachedPages(window)
             pages.pack(fill="both", expand=True)
-            for _ in range(2):
-                pages.add(ttk.Frame(pages))
+            frames = [ttk.Frame(pages) for _ in range(2)]
+            for frame in frames:
+                pages.add(frame)
+            scroller = ScrollablePage(frames[1])
+            ttk.Frame(scroller.content, height=1200).pack()
             pages.prepare()
             pages.select(1)
+            window.update_idletasks()
+            scroller.viewport.yview_moveto(.2)
             result["page_composition"] = len(pages.compositor.surfaces) == 2
+            result["scroll_composition"] = bool(scroller.viewport.compositor.retained)
+            result["scroll_runtime"] = scroller.viewport.yview()[0] > 0
             window.destroy()
             result["gui_runtime"] = True
             return result

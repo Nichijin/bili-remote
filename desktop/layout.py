@@ -7,6 +7,7 @@ import time
 from tkinter import ttk
 
 from .rendering import PageCompositor
+from .scrolling import ScrollViewport
 
 
 def enable_dpi_awareness():
@@ -87,7 +88,7 @@ class CachedPages(ttk.Frame):
 
     Unmapping a Notebook page recursively remapped every Windows child control
     on return. Keeping pages mapped avoids that work and retains scroll state.
-    Windows retains complete page surfaces. All pages follow the window size
+    Windows retains page or scroll contents surfaces. Pages follow window size
     before navigation, and transitions only translate surfaces, never reflow.
     Only the active page participates in keyboard traversal.
     """
@@ -106,6 +107,7 @@ class CachedPages(ttk.Frame):
         self.transition_paused_at = None
         self.slide_distance = round(30 * max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72)))
         self.layout_timer = None
+        self.scroll_views = {}
         self.scheduler = self.winfo_toplevel()
         # An opaque neutral background prevents the old page showing through
         # the new one's short fade. It never covers the active live controls.
@@ -155,13 +157,26 @@ class CachedPages(ttk.Frame):
             yield widget
             for child in widget.winfo_children():
                 yield from walk(child)
+        # Finish initial geometry before allocating retained contents. Avoid
+        # caching every intermediate size while constructing the window.
+        self.scheduler.update_idletasks()
+        layered_pages = []
         for index, page in enumerate(self.pages):
+            viewports = []
             for widget in walk(page):
+                if isinstance(widget, ScrollViewport):
+                    widget.prepare()
+                    viewports.append(widget)
                 if "takefocus" in widget.keys():
                     original = widget.cget("takefocus")
                     if str(original) != "0":
                         widget.configure(takefocus=(self.focus_command, index, original))
-        self.compositor = PageCompositor(self.pages)
+            self.scroll_views[index] = viewports
+            # A scroll page already retains its contents. A second full-page
+            # texture costs memory and repaint submissions with no benefit.
+            if not any(view.compositor.retained for view in viewports):
+                layered_pages.append(page)
+        self.compositor = PageCompositor(self.pages, layered_pages=layered_pages)
 
     def finish_transition(self, complete=True):
         self.transition_paused_at = None
@@ -275,6 +290,8 @@ class CachedPages(ttk.Frame):
         self.finish_transition(complete=False)
         self.finish_layout()
         previous = self.selected
+        for view in self.scroll_views.get(previous, ()):
+            view.stop_scroll()
         focused = self.focus_get()
         ancestor = focused
         while ancestor is not None and ancestor is not self.pages[previous]:
@@ -293,32 +310,20 @@ class ScrollablePage(ttk.Frame):
         super().__init__(parent)
         self.pack(fill="both", expand=True)
         self.rowconfigure(0, weight=1); self.columnconfigure(0, weight=1)
-        color = ttk.Style(self).lookup("TFrame", "background") or "#f0f0f0"
-        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, background=color, takefocus=True)
-        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.viewport = ScrollViewport(self, padding)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.viewport.yview)
+        self.viewport.scrollcommand = self.scrollbar.set
+        self.viewport.grid(row=0, column=0, sticky="nsew")
         self.scrollbar.grid(row=0, column=1, sticky="ns")
-        self.content = ttk.Frame(self.canvas, padding=padding)
-        self.item = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
-        self.content_width = self.scroll_region = None
-        self.canvas.bind("<Configure>", self.resize)
-        self.content.bind("<Configure>", self.update_scroll_region)
-        self.winfo_toplevel().bind("<MouseWheel>", self.wheel, add=True)
-        self.canvas.bind("<Next>", lambda event: self.canvas.yview_scroll(1, "pages"))
-        self.canvas.bind("<Prior>", lambda event: self.canvas.yview_scroll(-1, "pages"))
+        self.content = self.viewport.content
+        self.canvas = self.viewport  # yview compatibility for existing diagnostics.
+        self.scheduler = self.winfo_toplevel()
+        self.wheel_binding = self.scheduler.bind("<MouseWheel>", self.wheel, add=True)
+        self.bind("<Destroy>", self.on_destroy, add=True)
 
-    def resize(self, event):
-        width = max(1, event.width)
-        if width != self.content_width:
-            self.content_width = width
-            self.canvas.itemconfigure(self.item, width=width)
-
-    def update_scroll_region(self, event=None):
-        region = self.canvas.bbox("all")
-        if region != self.scroll_region:
-            self.scroll_region = region
-            self.canvas.configure(scrollregion=region)
+    def on_destroy(self, event):
+        if event.widget is self:
+            self.scheduler.unbind("<MouseWheel>", self.wheel_binding)
 
     def wheel(self, event):
         if not event.delta:
@@ -326,6 +331,6 @@ class ScrollablePage(ttk.Frame):
         widget = event.widget
         while widget is not None:
             if widget is self:
-                self.canvas.yview_scroll(-max(1, abs(event.delta) // 120) * (1 if event.delta > 0 else -1) * 3, "units")
+                self.viewport.wheel(event.delta)
                 return "break"
             widget = getattr(widget, "master", None)

@@ -98,6 +98,8 @@ def main():
                 time.sleep(.002)
             assert app.tabs.transition_timer is None
             for handle, _ in app.tabs.compositor.surfaces.values():
+                if handle not in app.tabs.compositor.retained:
+                    continue  # Scroll pages retain the contents, not a second page texture.
                 alpha, flags = wintypes.BYTE(), wintypes.DWORD()
                 assert user.GetLayeredWindowAttributes(handle, None, ctypes.byref(alpha), ctypes.byref(flags))
                 assert alpha.value == 255, "A cancelled page remained translucent"
