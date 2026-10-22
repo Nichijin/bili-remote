@@ -30,7 +30,7 @@ def walk(widget):
 
 def main():
     report = []
-    for width, height, scale in [(480, 360, 1), (640, 480, 1.25), (800, 550, 1.5), (1024, 640, 2), (1200, 780, 2), (1040, 780, 1), (1366, 900, 1.25)]:
+    for width, height, scale in [(480, 360, 1), (640, 480, 1.25), (800, 550, 1.5), (1024, 640, 2), (1200, 780, 2), (1040, 780, 1), (1366, 900, 1.25), (1920, 1080, 1)]:
         print(f"Layout {width}x{height}, font scale {scale}", flush=True)
         with tempfile.TemporaryDirectory(prefix="bili-layout-") as directory:
             def setup(window):
@@ -50,12 +50,14 @@ def main():
                     assert app.tabs.index(app.tabs.select()) == tab
                     page = app.tabs.nametowidget(app.tabs.select())
                     assert page.winfo_width() > 200 and page.winfo_height() > 100
+                    assert page.winfo_x() == 0 and page.winfo_width() == app.tabs.winfo_width(), "Unused page side columns"
                     for widget in walk(page):
                         if isinstance(widget, FlowRow):
                             for child in widget.items:
                                 assert child.winfo_x() + child.winfo_width() <= widget.winfo_width() + 2, (width, height, scale, child)
                 for tab, scroller in ((0, app.remote_page), (3, app.options_page)):
                     app.tabs.select(tab); app.window.update()
+                    assert scroller.content.winfo_width() == scroller.canvas.winfo_width(), "Scrollable content width capped"
                     scroller.canvas.yview_moveto(1); app.window.update()
                     last = scroller.content.winfo_children()[-1]
                     bottom = last.winfo_rooty() + last.winfo_height()
@@ -73,7 +75,7 @@ def main():
                 slider.event_generate("<ButtonRelease-1>", x=round(slider.winfo_width() * .25), y=start_y)
                 app.window.update()
                 assert 15 < app.feedback_vars["x"].get() < 40, (width, height, scale, "slider drag")
-                report.append({"window": f"{width}x{height}", "font_scale": scale, "navigation_reachable": True, "buttons_inside_rows": True, "bottom_actions_reachable": True, "slider_drag": True})
+                report.append({"window": f"{width}x{height}", "font_scale": scale, "navigation_reachable": True, "full_width_pages": True, "buttons_inside_rows": True, "bottom_actions_reachable": True, "slider_drag": True})
             finally:
                 for timer in app.window.tk.splitlist(app.window.tk.call("after", "info")):
                     app.window.after_cancel(timer)

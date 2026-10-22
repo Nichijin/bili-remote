@@ -1,4 +1,4 @@
-"""Exercise live Windows hit testing during fades, cancellation and cached resize.
+"""Exercise live Windows hit testing during motion, cancellation and cached resize.
 
 An isolated window is raised briefly; no player, network or production data.
 A real mouse click exercises Windows routing; the pointer is restored afterward.
@@ -109,7 +109,7 @@ def main():
             # events or layout work should be deferred until a menu is clicked.
             app.window.geometry("1120x780+30+30")
             app.window.update()
-            size = min(app.tabs.winfo_width(), app.tabs.max_page_width), app.tabs.winfo_height()
+            size = app.tabs.winfo_width(), app.tabs.winfo_height()
             assert all((page.winfo_width(), page.winfo_height()) == size for page in app.tabs.pages)
             configured = []
             for page in app.tabs.pages:
@@ -141,6 +141,8 @@ def main():
             app.window.update()
             assert app.tabs.select() == str(app.tabs.pages[0]), "Fallback failed"
             report = {"native_hit_test_and_click_during_fade": not desktop_locked,
+                      "native_hit_test_and_click_during_motion": not desktop_locked,
+                      "motion": "vertical_slide",
                       "native_input_limitation": "Windows session locked" if desktop_locked else None,
                       "tk_input_during_fade": True, "rapid_switches": 120,
                       "cancelled_pages_opaque": True, "same_page_no_restart": True,

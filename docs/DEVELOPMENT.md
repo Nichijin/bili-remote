@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
 
-本页面向维护者。当前项目版本为 **0.5.5**，安卓 `versionCode` 为 **15**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+本页面向维护者。当前项目版本为 **0.5.6**，安卓 `versionCode` 为 **16**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
 
 ## 项目结构
 
@@ -88,9 +88,9 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliGestureRemote`。
 
 若使用本项目本地工具缓存中的编译器，可省略 `--compiler`。脚本默认检查 `.tooling/inno/ISCC.exe`，不会自动安装 Inno Setup。编译前确认使用场景符合构建工具的许可。
 
-构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.5.exe`。普通用户分发安装器即可。
+构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.6.exe`。普通用户分发安装器即可。
 
-分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.5 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
+分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.6 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
 
 安装器固定 AppId，沿用实际旧安装路径，正常退出运行中的程序后替换文件。升级不调用旧卸载器，避免清空数据。保留实际自启和桌面快捷方式状态，原本运行的实例安装后恢复到托盘。支持同版本修复，拒绝较低版本降级。
 
@@ -104,7 +104,7 @@ Android Studio 可以打开 `android/`；Windows 也可使用便携构建脚本�
 .\.venv\Scripts\python.exe scripts/build_apk.py
 ```
 
-脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.5.apk`。无需安装到全局工具路径。便携构建中的 Java / javac 使用 256 MiB 堆上限和 2 个可见处理器，降低工作站内存紧张时的构建峰值；这是构建工具限制，不是安卓 App 的运行时内存配置。
+脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.6.apk`。无需安装到全局工具路径。便携构建中的 Java / javac 使用 256 MiB 堆上限和 2 个可见处理器，降低工作站内存紧张时的构建峰值；这是构建工具限制，不是安卓 App 的运行时内存配置。
 
 **从新克隆的仓库不能直接生成可覆盖现有用户版本的 APK。** 维护者必须先把原签名恢复到 `android/signing/app.keystore`。该私钥不在仓库中；旧项目若仍有 `.tooling/debug.keystore`，脚本会核对证书后复制原密钥。密钥缺失或不匹配时停止，不会静默生成不同身份。
 
@@ -124,12 +124,12 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/measure_desktop_responsiveness.py --output .tooling/responsiveness.json
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
 .\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.5.2
-.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.5.apk
+.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.6.apk
 ```
 
 遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动、5 挡设置、提示开关保存及连续进度，不代表安卓实机测试。`smoke_desktop_layout.py` 检查 7 组窗口与字体缩放下的真实侧栏导航、按钮换行、底部操作可达、表格滚动及新版滑块指针拖动，不等同于真实多显示器 DPI 切换测试。
 
-升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.4 → 0.5.5 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.5 → 0.5.6 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
 
 | 已验证范围 | 当前证据 |
 | --- | --- |
@@ -148,7 +148,7 @@ node --test tests/*.test.cjs
 
 连续进度通过 `status` 获取当前位置、`seek_start` / `seek_end` 和 `media_key`，再发送带小数秒的 `seek_to(position, media_key)`。横向整屏对应 120 秒，发送间隔约 80ms、最多一个未完成请求，快速移动合并为最新位置，松手补发最后位置。下一次拖动在前一次最终请求后读取基准；取消、后台或断线丢弃尚未发送的位置，不回滚已提交进度。网页使用视频元素及媒体源标识，客户端使用会话、范围和媒体属性摘要校验，避免旧拖动落到已变化的视频。客户端缺少媒体信息或时间轴时明确报错。
 
-`desktop/appearance.py` 使用 Pillow 将本地几何图形以 4 倍尺寸抗锯齿绘制，再生成 Tk 主题元素；卡片使用单一主题容器。圆角、开关、滑块、细滚动条及线性图标按设备像素生成并缓存，普通缩放不重新生成纹理。宽 / 窄内容采用稳定阅读宽度，较宽区域居中移动已有页面，跨布局断点才重新换行；没有浏览器界面内核、运行时图片下载或常驻动画。`desktop/rendering.py` 使用 Windows 分层子窗口保留完整页面，菜单仅切换层级并执行约 140 ms 的透明度过渡；目标控件从第一帧就接受输入。启动时读取 Windows 客户区动画偏好，系统关闭动画时直接切页；原生合成不可用时自动恢复普通 Tk 绘制。原生 Windows 标题栏保留最小化、最大化和关闭。
+`desktop/appearance.py` 使用 Pillow 将本地几何图形以 4 倍尺寸抗锯齿绘制，再生成 Tk 主题元素；卡片使用单一主题容器。圆角、开关、滑块、细滚动条及线性图标按设备像素生成并缓存，普通缩放不重新生成纹理。0.5.6 取消固定阅读宽度与居中，两层页面容器均铺满可用区域，只保留左右 14 个逻辑像素内边距；窗口尺寸变化时按实际可用宽度布局，切页复用已准备页面；没有浏览器界面内核、运行时图片下载或常驻动画。`desktop/rendering.py` 使用 Windows 分层子窗口保留完整页面，菜单切换层级并使用原生 `SetWindowPos` 将目标页面按菜单方向短距离上下滑入，约 200 ms；`desktop/navigation.py` 在固定文字和图标下绘制移动选中背景，与页面共用一个动画计时器。目标约 60 帧 / 秒，按真实经过时间推进，迟到时跳到当前位置，不堆积补帧；逐帧只移动已有 HWND 与 Canvas 图像坐标，不重新布局、生成图片或调用 `update()`；目标控件从第一帧就接受输入。启动时读取 Windows 客户区动画偏好，系统关闭动画时直接切页；原生合成不可用时自动恢复普通 Tk 绘制。原生 Windows 标题栏保留最小化、最大化和关闭。
 
 `desktop/layout.py` 负责工作区窗口尺寸、滚动页面、文字换行和按钮行换行；`desktop/assets/app.manifest` 声明 Per Monitor V2，打包脚本嵌入该清单。
 
@@ -160,14 +160,14 @@ node --test tests/*.test.cjs
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/measure_desktop_memory.py .tooling/upgrade-baseline-0.5.0/BiliRemote-Desktop.exe --output .tooling/memory-0.5.0.json
-.\.venv\Scripts\python.exe scripts/measure_desktop_memory.py dist/BiliRemote-Desktop.exe --output .tooling/memory-0.5.5.json
+.\.venv\Scripts\python.exe scripts/measure_desktop_memory.py dist/BiliRemote-Desktop.exe --output .tooling/memory-0.5.6.json
 ```
 
 ## 交互性能复测
 
-`measure_desktop_responsiveness.py` 使用独立数据目录、不启动网络和检测服务，测量菜单切换到 Tk 绘制队列排空的耗时、首次设置开关输入、过渡结束、30 次滑块指针移动及窗口尺寸变化，不仅计时按钮回调。`--source-root` 可指向旧版源码目录做同机对比；`--rounds` 默认为 3，`--resize-steps` 默认为 12，`--profile` 可选生成 cProfile 文件。每次切页后等待过渡完成再测下一次，首次设置操作在过渡期间发送，分别报告首帧可用与动画结束，避免把动画时间算成输入等待。`--min-width` / `--max-width` 可覆盖窄窗口范围；宽窗口移动缓存页面与跨断点重排应分别报告，避免只用中位数隐藏重排峰值。比较时两版使用相同参数，按顺序运行，不并行启动其他 GUI 测试。它是桌面源程序的隔离测量，不能代表所有电脑、所有播放器负载或安卓网络延迟。
+`measure_desktop_responsiveness.py` 使用独立数据目录、不启动网络和检测服务，测量菜单切换到 Tk 绘制队列排空的耗时、首次设置开关输入、过渡结束、30 次滑块指针移动及窗口尺寸变化，不仅计时按钮回调。`--source-root` 可指向旧版源码目录做同机对比；`--rounds` 默认为 3，`--resize-steps` 默认为 12，`--profile` 可选生成 cProfile 文件。每次切页后等待过渡完成再测下一次，首次设置操作在过渡期间发送，分别报告首帧可用与动画结束，避免把动画时间算成输入等待。`--min-width` / `--max-width` 可覆盖窄窗口范围；全宽页面缩放涉及重排，需同时报告中位数及峰值，避免只用中位数隐藏重排峰值。比较时两版使用相同参数，按顺序运行，不并行启动其他 GUI 测试。它是桌面源程序的隔离测量，不能代表所有电脑、所有播放器负载或安卓网络延迟。
 
-`smoke_desktop_responsiveness.py` 检查反复切换后控件身份、设置和滚动位置保留；Tab 跳过后台页；1200 条操作反馈不会阻塞其他界面回调、顺序保留、最近 100 条日志及失败颜色正确；悬停提示显示期间退出可正常清理。`smoke_desktop_transitions.py` 使用 Windows 原生命中测试及真实鼠标点击确认淡入期间可立即切换设置；Windows 锁屏时改用 Tk 指针事件并明确记录原生输入未验证，不把锁屏期间的测试当作物理鼠标验证，检查 120 次快速切页、透明度还原、GDI / 图像复用、缩放后切页无布局事件、最小化及退出清理、减少动画和普通 Tk 回退。测试会短暂置顶独立窗口并恢复鼠标位置。
+`smoke_desktop_responsiveness.py` 检查反复切换后控件身份、设置和滚动位置保留；Tab 跳过后台页；1200 条操作反馈不会阻塞其他界面回调、顺序保留、最近 100 条日志及失败颜色正确；悬停提示显示期间退出可正常清理。`smoke_desktop_transitions.py` 使用 Windows 原生命中测试及真实鼠标点击确认淡入期间可立即切换设置；Windows 锁屏时改用 Tk 指针事件并明确记录原生输入未验证，不把锁屏期间的测试当作物理鼠标验证，检查 120 次快速切页、透明度还原、GDI / 图像复用、缩放后切页无布局事件、最小化及退出清理、减少动画和普通 Tk 回退。测试会短暂置顶独立窗口并恢复鼠标位置。`smoke_menu_motion.py` 测量共享动画的帧间隔、正反方向、动画期间输入、连续反向切换无跳回及缩放 / 隐藏 / 退出清理；计时不包括显示器实际扫描输出，不能保证所有硬件始终不掉帧。
 
 ## 分发整合包
 
@@ -177,7 +177,7 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/package_kit.py
 ```
 
-产物是 `dist/bili-remote-kit-0.5.5.zip` 与 `dist/SHA256-0.5.5.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+产物是 `dist/bili-remote-kit-0.5.6.zip` 与 `dist/SHA256-0.5.6.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
 
 整合脚本只接收当前版本的两端安装包；缺少任一文件即停止，不会回退到无版本号文件或把旧版本混入新整合包。修改项目版本后会生成新的文件名，旧版带版本号的产物不会被覆盖。
 

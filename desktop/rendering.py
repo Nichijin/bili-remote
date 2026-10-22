@@ -1,4 +1,4 @@
-"""Small Windows page surfaces; alpha changes never block or disable input."""
+"""Small retained Windows page surfaces; transforms preserve live input."""
 import contextlib
 import ctypes
 from ctypes import wintypes
@@ -19,6 +19,8 @@ class PageCompositor:
         self.user = None
         self.animate = False
         self.paused = set()
+        self.motion_clock = None
+        self.motion_clock_active = False
         if sys.platform != "win32":
             return
         try:
@@ -40,6 +42,8 @@ class PageCompositor:
             user.SendMessageW.restype = wintypes.LPARAM
             user.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
             user.RedrawWindow.restype = wintypes.BOOL
+            user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+            user.SetWindowPos.restype = wintypes.BOOL
             self.user = user
             for page in pages:
                 handle = page.winfo_id()
@@ -50,12 +54,33 @@ class PageCompositor:
                     raise OSError("Child page composition unavailable")
             enabled = wintypes.BOOL()
             self.animate = bool(user.SystemParametersInfoW(0x1042, 0, ctypes.byref(enabled), 0) and enabled.value)
+            with contextlib.suppress(OSError, AttributeError):
+                self.motion_clock = ctypes.WinDLL("winmm")
+                self.motion_clock.timeBeginPeriod.argtypes = [wintypes.UINT]
+                self.motion_clock.timeEndPeriod.argtypes = [wintypes.UINT]
         except (AttributeError, OSError):
             self.close()
 
     def opacity(self, page, alpha):
         surface = self.surfaces.get(page)
         return bool(surface and self.user.SetLayeredWindowAttributes(surface[0], 0, alpha, 2))
+
+    def move(self, page, y):
+        surface = self.surfaces.get(page)
+        # Only translate the retained HWND surface. No geometry manager call,
+        # child resize or image generation belongs in an animation frame.
+        return bool(surface and self.user.SetWindowPos(surface[0], None, 0, round(y), 0, 0, 0x15))
+
+    def begin_motion(self):
+        # Request precise timers only while moving; the default coarse Windows
+        # timer can round one frame into two. Balance on completion/cancel/hide.
+        if self.motion_clock and not self.motion_clock_active:
+            self.motion_clock_active = self.motion_clock.timeBeginPeriod(1) == 0
+
+    def end_motion(self):
+        if self.motion_clock_active:
+            self.motion_clock.timeEndPeriod(1)
+            self.motion_clock_active = False
 
     def pause_layout(self):
         # Batch the intermediate geometry paints, rather than submitting a
@@ -74,6 +99,7 @@ class PageCompositor:
         self.paused.clear()
 
     def close(self):
+        self.end_motion()
         self.resume_layout()
         for handle, style in self.surfaces.values():
             with contextlib.suppress(OSError):

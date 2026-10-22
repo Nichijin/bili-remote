@@ -21,6 +21,7 @@ from .detection import ClientDetector, combine
 from .discovery import start_discovery
 from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
 from .layout import CachedPages, FlowRow, ScrollablePage, enable_dpi_awareness, fit_window, wrapped_label
+from .navigation import NavigationButton, NavigationSelection
 from .pairing import PairingCode
 from .server import Relay
 from .trust import TrustStore
@@ -103,12 +104,13 @@ class Companion:
         for index, (text, kind) in enumerate((("连接与播放", "remote"), ("客户端与版本", "devices"), ("操作记录", "history"), ("设置", "settings"))):
             icons = [line_icon(self.window, kind, self.px(20), color) for color in ("#667184", "#0065D5")]
             self.nav_icons.append(icons)
-            button = ttk.Button(self.sidebar, text="  " + text, image=icons[0], compound="left", style="Nav.TButton",
-                                command=lambda n=index: tabs.select(n), takefocus=True)
-            button.pack(fill="x", padx=self.px(10), pady=self.px(3))
+            button = NavigationButton(self.sidebar, text, icons, lambda n=index: tabs.select(n), self.ui_scale, self.font_family)
+            button.pack(fill="x", padx=self.px(10))
             tooltip(button, f"{text}  ·  Alt+{index + 1}")
             self.window.bind(f"<Alt-Key-{index + 1}>", lambda event, n=index: tabs.select(n))
             self.navigation.append((button, text))
+        self.navigation_selection = NavigationSelection([button for button, _ in self.navigation], self.ui_scale)
+        tabs.transition_observer = self.navigation_selection.progress
         self.sidebar_footer = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
         self.sidebar_footer.pack(side="bottom", fill="x", padx=self.px(14), pady=self.px(20))
         self.help_button = ttk.Button(self.sidebar_footer, text="使用指南  ↗", style="Nav.TButton", command=self.open_help)
@@ -122,10 +124,11 @@ class Companion:
         self.window.bind("<Unmap>", self.update_inventory_visibility, add=True)
         self.window.bind("<Unmap>", lambda event: self.end_feedback_preview() if event.widget is self.window else None, add=True)
         self.window.bind("<Escape>", lambda event: self.end_feedback_preview(), add=True)
-        self.remote_page = ScrollablePage(remote_page, padding=self.px(26))
-        self.options_page = ScrollablePage(options_page, padding=self.px(26))
+        page_padding = (self.px(14), self.px(22))
+        self.remote_page = ScrollablePage(remote_page, padding=page_padding)
+        self.options_page = ScrollablePage(options_page, padding=page_padding)
         remote, options = self.remote_page.content, self.options_page.content
-        detection.configure(padding=self.px(26)); records.configure(padding=self.px(26))
+        detection.configure(padding=page_padding); records.configure(padding=page_padding)
         self.page_heading(remote, "连接与播放", "BILI REMOTE", "让手机成为遥控器，轻点、滑动或按住即可控制。")
         pairing_card = Card(remote, self.ui_scale)
         pairing_card.pack(fill="x", pady=(0, self.px(15)))
@@ -261,7 +264,7 @@ class Companion:
         else:
             self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)), before=self.navigation[0][0])
         for button, name in self.navigation:
-            button.configure(compound="image" if compact else "left")
+            button.set_compact(compact)
         self.sidebar_footer.pack_configure(padx=self.px(8 if compact else 14), pady=self.px(12 if short else 20))
         self.help_button.configure(text="?" if compact else "使用指南  ↗")
         if short:
@@ -279,7 +282,8 @@ class Companion:
         for index in {self.active_navigation, current} - {None}:
             button, name = self.navigation[index]
             selected = index == current
-            button.configure(style="Selected.Nav.TButton" if selected else "Nav.TButton", image=self.nav_icons[index][int(selected)])
+            button.set_selected(selected)
+        self.navigation_selection.select(current, self.tabs.compositor.animate and bool(self.tabs.winfo_ismapped()))
         self.active_navigation = current
         self.update_inventory_visibility()
 

@@ -88,7 +88,7 @@ class CachedPages(ttk.Frame):
     Unmapping a Notebook page recursively remapped every Windows child control
     on return. Keeping pages mapped avoids that work and retains scroll state.
     Windows retains complete page surfaces. All pages follow the window size
-    before navigation, and transitions change only opacity, never layout/input.
+    before navigation, and transitions only translate surfaces, never reflow.
     Only the active page participates in keyboard traversal.
     """
     def __init__(self, parent):
@@ -98,12 +98,13 @@ class CachedPages(ttk.Frame):
         self.focus_command = self.register(self.allow_focus)
         self.page_sizes = {}
         self.current_size = None
-        scale = max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72))
-        self.max_page_width = round(640 * scale)
-        self.compact_page_width = round(360 * scale)
         self.compositor = None
         self.transition_timer = None
         self.transition_page = None
+        self.transition_observer = None
+        self.transition_duration = .2
+        self.transition_paused_at = None
+        self.slide_distance = round(30 * max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72)))
         self.layout_timer = None
         self.scheduler = self.winfo_toplevel()
         # An opaque neutral background prevents the old page showing through
@@ -113,6 +114,8 @@ class CachedPages(ttk.Frame):
         self.bind("<Configure>", self.resize)
         self.bind("<Destroy>", self.on_destroy, add=True)
         self.unmap_binding = self.scheduler.bind("<Unmap>", self.on_unmap, add=True)
+        self.press_binding = self.scheduler.bind("<ButtonPress-1>", self.pause_for_input, add=True)
+        self.release_binding = self.scheduler.bind("<ButtonRelease-1>", self.resume_after_input, add=True)
 
     def add(self, page, text=None):
         self.pages.append(page)
@@ -125,16 +128,9 @@ class CachedPages(ttk.Frame):
             self.pages[index].place_configure(width=size[0], height=size[1])
 
     def resize(self, event):
-        # Stable desktop/compact reading widths: dragging one more pixel must
-        # not remeasure and wrap every label in every page. Only cross-layout
-        # changes and unusually narrow accessibility layouts need reflow.
-        width = self.max_page_width if event.width >= self.max_page_width else min(event.width, self.compact_page_width)
-        size = max(1, width), max(1, event.height)
-        offset = max(0, (event.width - size[0]) // 2)
-        if offset != getattr(self, "page_offset", None):
-            self.page_offset = offset
-            for page in self.pages:
-                page.place_configure(x=offset)
+        # Pages fill the space beside the sidebar; layout and paint caching
+        # must not impose a fixed reading width or leave unused side columns.
+        size = max(1, event.width), max(1, event.height)
         if size == self.current_size:
             return
         self.finish_transition()
@@ -167,33 +163,76 @@ class CachedPages(ttk.Frame):
                         widget.configure(takefocus=(self.focus_command, index, original))
         self.compositor = PageCompositor(self.pages)
 
-    def finish_transition(self):
+    def finish_transition(self, complete=True):
+        self.transition_paused_at = None
+        if self.compositor:
+            self.compositor.end_motion()
         if self.transition_timer is not None:
             self.scheduler.after_cancel(self.transition_timer)
             self.transition_timer = None
         if self.transition_page is not None:
             self.compositor.opacity(self.transition_page, 255)
+            self.compositor.move(self.transition_page, 0)
             self.transition_page = None
+        if complete and self.transition_observer:
+            self.transition_observer(1)
 
-    def transition(self, page):
+    def transition(self, page, direction):
         if not self.compositor or not self.compositor.animate or not self.winfo_ismapped():
             return
         self.transition_page = page
+        self.transition_offset = direction * self.slide_distance
         self.transition_started = time.perf_counter()
+        self.transition_next_frame = self.transition_started
+        self.compositor.begin_motion()
         self.animate_frame()
 
     def animate_frame(self):
         self.transition_timer = None
-        elapsed = (time.perf_counter() - self.transition_started) / .14
+        now = time.perf_counter()
+        elapsed = (now - self.transition_started) / self.transition_duration
         if elapsed >= 1:
             self.finish_transition()
             return
-        # Ease out, starting at 90% opacity: the entire page is already usable.
-        alpha = round(230 + 25 * (1 - (1 - elapsed) ** 3))
-        if not self.compositor.opacity(self.transition_page, alpha):
+        # A short vertical ease-out keeps the target's real controls available
+        # from the first frame, instead of sliding a full-screen screenshot.
+        progress = 1 - (1 - elapsed) ** 3
+        if not self.compositor.move(self.transition_page, self.transition_offset * (1-progress)):
             self.finish_transition()
             return
-        self.transition_timer = self.scheduler.after(16, self.animate_frame)
+        if self.transition_observer:
+            self.transition_observer(progress)
+        # Schedule against elapsed time, not callback completion, so paint
+        # time is not added to every 60 Hz frame interval. Late frames skip
+        # ahead instead of building up a queue.
+        self.transition_next_frame += 1 / 60
+        if self.transition_next_frame <= now:
+            self.transition_next_frame = now + 1 / 60
+        self.transition_timer = self.scheduler.after(max(1, round((self.transition_next_frame-time.perf_counter())*1000)), self.animate_frame)
+
+    def pause_for_input(self, event):
+        if self.transition_page is None or self.transition_paused_at is not None:
+            return
+        widget = event.widget
+        while widget is not None and widget is not self.transition_page:
+            widget = getattr(widget, "master", None)
+        if widget is self.transition_page:
+            # Hold the live target under the pointer while it is pressed, so
+            # the next animation frame cannot move a switch out of the click.
+            self.transition_paused_at = time.perf_counter()
+            self.compositor.end_motion()
+            if self.transition_timer is not None:
+                self.scheduler.after_cancel(self.transition_timer)
+                self.transition_timer = None
+
+    def resume_after_input(self, event):
+        if self.transition_paused_at is not None and self.transition_page is not None:
+            now = time.perf_counter()
+            self.transition_started += now-self.transition_paused_at
+            self.transition_paused_at = None
+            self.transition_next_frame = now
+            self.compositor.begin_motion()
+            self.animate_frame()
 
     def on_unmap(self, event):
         if event.widget is self.scheduler:
@@ -202,11 +241,14 @@ class CachedPages(ttk.Frame):
 
     def on_destroy(self, event):
         if event.widget is self:
+            self.transition_observer = None
             self.finish_transition()
             self.finish_layout()
             if self.compositor:
                 self.compositor.close()
             self.scheduler.unbind("<Unmap>", self.unmap_binding)
+            self.scheduler.unbind("<ButtonPress-1>", self.press_binding)
+            self.scheduler.unbind("<ButtonRelease-1>", self.release_binding)
 
     def allow_focus(self, index, original, widget):
         if int(index) != self.selected:
@@ -230,7 +272,7 @@ class CachedPages(ttk.Frame):
         index = self.index(page)
         if index == self.selected:
             return
-        self.finish_transition()
+        self.finish_transition(complete=False)
         self.finish_layout()
         previous = self.selected
         focused = self.focus_get()
@@ -238,12 +280,12 @@ class CachedPages(ttk.Frame):
         while ancestor is not None and ancestor is not self.pages[previous]:
             ancestor = getattr(ancestor, "master", None)
         self.selected = index
+        self.event_generate("<<NotebookTabChanged>>")
         self.backdrop.tkraise()
-        self.transition(self.pages[index])
+        self.transition(self.pages[index], 1 if index > previous else -1)
         self.pages[index].tkraise()
         if ancestor is not None:
             self.focus_set()
-        self.event_generate("<<NotebookTabChanged>>")
 
 
 class ScrollablePage(ttk.Frame):
@@ -260,7 +302,6 @@ class ScrollablePage(ttk.Frame):
         self.content = ttk.Frame(self.canvas, padding=padding)
         self.item = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
         self.content_width = self.scroll_region = None
-        self.max_content_width = round(652 * max(.75, float(self.tk.call("tk", "scaling")) / (96 / 72)))
         self.canvas.bind("<Configure>", self.resize)
         self.content.bind("<Configure>", self.update_scroll_region)
         self.winfo_toplevel().bind("<MouseWheel>", self.wheel, add=True)
@@ -268,9 +309,7 @@ class ScrollablePage(ttk.Frame):
         self.canvas.bind("<Prior>", lambda event: self.canvas.yview_scroll(-1, "pages"))
 
     def resize(self, event):
-        width = max(1, min(event.width, self.max_content_width))
-        # A stable leading edge avoids moving every descendant HWND on each
-        # pixel of a window drag. Extra desktop space stays as a quiet margin.
+        width = max(1, event.width)
         if width != self.content_width:
             self.content_width = width
             self.canvas.itemconfigure(self.item, width=width)
