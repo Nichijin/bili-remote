@@ -35,6 +35,9 @@ def main():
         parser.error("resize widths must satisfy 440 <= min-width < max-width <= 3840")
     sys.path.insert(0, str(args.source_root.resolve()))
     from desktop.gui import Companion
+    if hasattr(Companion, "dispose"):
+        from qt_measurements import run
+        return run(args, scrolling=False)
     class Preview(Companion):
         def start(self):
             self.status.set("电脑已在线，正在广播；等待手机连接。")

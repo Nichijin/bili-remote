@@ -1,618 +1,417 @@
-"""Windows companion: first-use PIN, direct playback and visible operation feedback."""
+"""Desktop companion: one raster backing store, no browser or GPU scene."""
 import asyncio
 import contextlib
+import ctypes
+from ctypes import wintypes
 import logging
+from logging.handlers import RotatingFileHandler
 import os
+from pathlib import Path
 import queue
-import socket
 import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from tkinter import colorchooser, messagebox, ttk
 
-from websockets.asyncio.server import serve
+from PySide6.QtCore import QEvent, Qt, QTimer, QSignalBlocker
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QColorDialog, QComboBox,
+    QHBoxLayout, QHeaderView, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
+    QMenu, QMessageBox, QScrollArea, QSlider, QSpinBox, QStackedWidget,
+    QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from .appearance import BLUE, LINE, MUTED, SIDEBAR, SURFACE, TEXT, Card, Columns, apply_theme, line_icon, preference_row, tooltip
-from .detection import ClientDetector, combine
-from .discovery import start_discovery
-from .feedback import DEFAULT_STYLE, OperationOverlay, normalize_style
-from .layout import CachedPages, FlowRow, ScrollablePage, enable_dpi_awareness, fit_window, wrapped_label
-from .navigation import NavigationButton, NavigationSelection
-from .pairing import PairingCode
-from .server import Relay
-from .trust import TrustStore
-from .subtitle_preview import SubtitlePreview
+from .feedback import DEFAULT_STYLE, normalize_style
+from .qt_feedback import OperationOverlay
+from .qt_widgets import STYLE, Card, FlowLayout, ResponsiveColumns, SubtitlePreview, Switch, button, label, navigation_icon
+from .runtime import ServiceRuntime
 from .version import APP_VERSION
-from .windows import NativeTray, Preferences, InstanceGuard, WINDOW_TITLE, data_directory, icon_path, installed_uninstaller, signal_existing, startup_enabled, set_startup
+from .windows import (Preferences, InstanceGuard, WINDOW_TITLE, WM_SHOW, WM_QUIT,
+    data_directory, icon_path, installed_uninstaller, signal_existing, startup_enabled, set_startup)
 
 
-class Companion:
-    def __init__(self, hidden=False, port=8765, discovery_port=8766, trust_path=None, background=False, preferences_path=None):
-        enable_dpi_awareness()
-        self.window = tk.Tk()
-        self.window.report_callback_exception = lambda kind, value, traceback: logging.error(
-            "界面回调失败", exc_info=(kind, value, traceback))
-        # Prepare real controls and geometry before exposing the main window.
-        # No partially constructed page is shown during cold startup.
-        self.window.withdraw()
-        self.hidden, self.port, self.discovery_port, self.trust_path = hidden, port, discovery_port, trust_path
-        self.window.title(WINDOW_TITLE)
-        with contextlib.suppress(tk.TclError):
-            self.window.iconbitmap(default=str(icon_path()))
-        self.ui_scale = fit_window(self.window)
-        self.events = queue.Queue()
-        self.thread = self.loop = self.stop_event = self.relay = self.detection_request = None
-        self.closing = self.request_stop = False
+def application():
+    app = QApplication.instance()
+    if app is None:
+        # QWidget double-buffers non-native children in its window backing store.
+        # Never add WA_NativeWindow, an OpenGL viewport or layered child HWNDs.
+        app = QApplication([sys.argv[0]])
+        app.setStyle("Fusion")
+        app.setFont(QFont("Microsoft YaHei UI", 10))
+        app.setQuitOnLastWindowClosed(False)
+    return app
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+        self.setWindowTitle(WINDOW_TITLE)
+        self.setWindowIcon(QIcon(str(icon_path())))
+
+    def closeEvent(self, event):
+        if self.owner.closing:
+            event.accept()
+        else:
+            event.ignore()
+            self.owner.on_close_window()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.owner.update_inventory_visibility()
+            if self.isMinimized():
+                self.owner.end_feedback_preview()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.owner.resize_navigation()
+
+    def nativeEvent(self, event_type, message):
+        if sys.platform == "win32":
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message in (WM_SHOW, WM_QUIT):
+                self.owner.events.put(("quit" if msg.message == WM_QUIT else "show", None))
+                return True, 0
+        return super().nativeEvent(event_type, message)
+
+
+class Companion(ServiceRuntime):
+    def __init__(self, hidden=False, port=8765, discovery_port=8766, trust_path=None,
+                 background=False, preferences_path=None):
+        self.app = application()
+        super().__init__(queue.Queue(), port, discovery_port, trust_path)
+        self.hidden = hidden
         self.preferences = Preferences(preferences_path or (Path(trust_path).with_name("settings.json") if trust_path else None))
-        self.detector = ClientDetector()
-        self.inventory_visible = threading.Event()
-        self.inventory_signature = None
-        self.inventory_rows = {}
-        self.inventory_force = threading.Event()
-        self.update_busy = False
-        self.update_started = False
-        self.update_download = ""
-        self.feedback_save_timer = None
-        self.feedback_editor = None
-        self.feedback_dragging = False
         self.feedback_style = normalize_style(self.preferences.values.get("feedback_style"))
-        self.pairing = PairingCode()
-        self.tray = self.overlay = None
+        self.overlay = self.feedback_editor = self.tray = None
         self.last_overlay_time = 0
+        self.update_busy = self.update_started = False
+        self.update_download = ""
+        self.active_navigation = self.compact_navigation = None
+        self.window = MainWindow(self)
+        self.window.setStyleSheet(STYLE)
         self.build_ui()
-        if not hidden:
-            try:
-                self.tray = NativeTray(self.window, lambda kind: self.events.put((kind, None)))
-            except OSError as exc:
-                logging.warning("桌面提示或托盘不可用：%s", exc)
-        self.window.protocol("WM_DELETE_WINDOW", self.on_close_window)
-        self.window.after(50, self.poll)
+        area = self.window.screen().availableGeometry()
+        self.window.resize(min(1040, area.width()-32), min(780, area.height()-48))
+        self.window.setMinimumSize(min(440, area.width()), min(300, area.height()))
+        self.window.move(area.center()-self.window.rect().center())
+        self.feedback_save_timer = QTimer(self.window)
+        self.feedback_save_timer.setSingleShot(True)
+        self.feedback_save_timer.timeout.connect(self.flush_feedback_style)
+        self.poll_timer = QTimer(self.window)
+        self.poll_timer.setInterval(50)
+        self.poll_timer.timeout.connect(self.poll)
+        self.poll_timer.start()
+        if not hidden and QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = QSystemTrayIcon(self.window.windowIcon(), self.window)
+            self.tray.setToolTip("哔哩哔哩手势遥控 · 双击打开")
+            menu = QMenu(self.window)
+            menu.addAction("打开电脑端", self.show)
+            menu.addAction("退出", self.close)
+            self.tray.setContextMenu(menu)
+            self.tray.activated.connect(lambda reason: self.show() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+            self.tray.show()
         self.start()
-        if background:
-            self.minimize()
-        elif not hidden:
-            self.window.update_idletasks()
-            self.window.deiconify()
-            # Mapping creates real expose events that a withdrawn window's
-            # update_idletasks cannot process. Finish this one initial map /
-            # paint pass before returning a supposedly ready main window.
-            self.window.update()
+        if not hidden and not background:
+            self.show()
+        # Keep one HWND even in tray-only mode for the established installer IPC.
+        self.window.winId()
 
     def build_ui(self):
-        self.font_family = apply_theme(self.window, self.ui_scale)
-        self.compact_navigation = None
-        self.short_navigation = None
-        self.active_navigation = None
-        self.shell = ttk.Frame(self.window)
-        self.shell.pack(fill="both", expand=True)
-        self.sidebar = ttk.Frame(self.shell, style="Sidebar.TFrame")
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
-        self.sidebar.configure(width=self.px(208))
-        ttk.Frame(self.shell, width=1, style="Sidebar.TFrame").pack(side="left", fill="y")
-        self.brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        self.brand.pack(fill="x", padx=self.px(18), pady=(self.px(30), self.px(34)))
-        self.brand_icon = line_icon(self.window, "remote", self.px(34), BLUE)
-        logo = ttk.Label(self.brand, image=self.brand_icon, style="Sidebar.TLabel")
-        logo.pack(side="left")
-        self.brand_text = ttk.Frame(self.brand, style="Sidebar.TFrame")
-        self.brand_text.pack(side="left", padx=(self.px(9), 0))
-        ttk.Label(self.brand_text, text="Bili Remote", style="Sidebar.Brand.TLabel").pack(anchor="w")
-        ttk.Label(self.brand_text, text="哔哩哔哩手势遥控", style="Sidebar.Caption.TLabel").pack(anchor="w", pady=(self.px(3), 0))
-        self.nav_heading = ttk.Label(self.sidebar, text="工作空间", style="Sidebar.Caption.TLabel")
-        self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)))
-        tabs = CachedPages(self.shell)
-        tabs.pack(side="left", fill="both", expand=True)
-        remote_page, detection, options_page, records = [ttk.Frame(tabs) for _ in range(4)]
-        for widget, name in ((remote_page, "连接与播放"), (detection, "客户端与版本"), (records, "操作记录"), (options_page, "设置")):
-            tabs.add(widget, text=name)
-        self.tabs = tabs
-        self.detection_page = detection
-        self.navigation = []
-        self.nav_icons = []
-        for index, (text, kind) in enumerate((("连接与播放", "remote"), ("客户端与版本", "devices"), ("操作记录", "history"), ("设置", "settings"))):
-            icons = [line_icon(self.window, kind, self.px(20), color) for color in ("#667184", "#0065D5")]
-            self.nav_icons.append(icons)
-            button = NavigationButton(self.sidebar, text, icons, lambda n=index: tabs.select(n), self.ui_scale, self.font_family)
-            button.pack(fill="x", padx=self.px(10))
-            tooltip(button, f"{text}  ·  Alt+{index + 1}")
-            self.window.bind(f"<Alt-Key-{index + 1}>", lambda event, n=index: tabs.select(n))
-            self.navigation.append((button, text))
-        self.navigation_selection = NavigationSelection([button for button, _ in self.navigation], self.ui_scale)
-        self.sidebar_footer = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        self.sidebar_footer.pack(side="bottom", fill="x", padx=self.px(14), pady=self.px(20))
-        self.help_button = ttk.Button(self.sidebar_footer, text="使用指南  ↗", style="Nav.TButton", command=self.open_help)
-        self.help_button.pack(fill="x", pady=(0, self.px(16)))
-        self.service_hint = tk.StringVar(value="●  正在启动")
-        self.service_label = ttk.Label(self.sidebar_footer, textvariable=self.service_hint, style="Sidebar.Caption.TLabel")
-        self.service_label.pack(anchor="w", padx=self.px(8))
-        tabs.bind("<<NotebookTabChanged>>", self.on_page_changed)
-        self.window.bind("<Configure>", self.resize_navigation, add=True)
-        self.window.bind("<Map>", self.update_inventory_visibility, add=True)
-        self.window.bind("<Unmap>", self.update_inventory_visibility, add=True)
-        self.window.bind("<Unmap>", lambda event: self.end_feedback_preview() if event.widget is self.window else None, add=True)
-        self.window.bind("<Escape>", lambda event: self.end_feedback_preview(), add=True)
-        page_padding = (self.px(14), self.px(22))
-        self.remote_page = ScrollablePage(remote_page, padding=page_padding)
-        self.options_page = ScrollablePage(options_page, padding=page_padding)
-        self.clients_page = ScrollablePage(detection, padding=page_padding)
-        remote, options = self.remote_page.content, self.options_page.content
-        detection = self.clients_page.content
-        records.configure(padding=page_padding)
-        self.page_heading(remote, "连接与播放", "BILI REMOTE", "让手机成为遥控器，轻点、滑动或按住即可控制。")
-        pairing_card = Card(remote, self.ui_scale)
-        pairing_card.pack(fill="x", pady=(0, self.px(15)))
-        pairing_columns = Columns(pairing_card.content, self.ui_scale)
-        pairing_columns.pack(fill="x")
-        connection, pairing = pairing_columns.left, pairing_columns.right
-        ttk.Label(connection, text="连接你的手机", style="Surface.Heading.TLabel").pack(anchor="w")
-        wrapped_label(connection, text="两端接入同一局域网，在手机中选择这台电脑。", style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(6), self.px(10)))
-        self.status = tk.StringVar(value="正在启动…")
-        self.status_label = wrapped_label(connection, textvariable=self.status, style="Surface.TLabel", foreground=BLUE)
-        self.status_label.pack(anchor="w", pady=(self.px(10), self.px(5)))
-        self.addresses = tk.StringVar()
-        wrapped_label(connection, textvariable=self.addresses, style="Surface.Muted.TLabel").pack(anchor="w", pady=(0, self.px(15)))
-        ttk.Label(pairing, text="首次连接配对码", style="Surface.Muted.TLabel").pack(anchor="w")
-        pin_frame = FlowRow(pairing, style="Surface.TFrame")
-        pin_frame.pack(fill="x", pady=(0, self.px(5)))
-        self.pin_text = tk.StringVar()
-        pin_frame.add(ttk.Label(pin_frame, textvariable=self.pin_text, style="Surface.Pin.TLabel"))
-        pin_frame.add(ttk.Button(pin_frame, text="刷新", command=self.refresh_pin))
-        wrapped_label(pairing, text="配对一次，以后自动重连。配对码每 10 分钟更新。", style="Surface.Muted.TLabel").pack(anchor="w")
-        player = self.card(remote, "播放视频", "打开专用播放窗口，选择你想看的视频。")
-        ttk.Button(player, text="打开哔哩哔哩 · 无需扩展", command=self.open_browser, style="Primary.TButton").pack(anchor="w", pady=(self.px(17), self.px(12)))
-        wrapped_label(player, text="专用 Edge / Chrome 窗口支持完整遥控。Windows 客户端请手动打开，可用功能取决于客户端接口。", style="Surface.Muted.TLabel").pack(anchor="w")
-        recent = self.card(remote, "最近一次操作")
-        self.last_operation = tk.StringVar(value="尚无遥控操作")
-        wrapped_label(recent, textvariable=self.last_operation, style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(7), 0))
-        actions = FlowRow(remote)
-        actions.pack(fill="x", pady=(self.px(4), self.px(8)))
-        self.toggle = ttk.Button(actions, text="停止服务", command=self.toggle_service)
-        actions.add(self.toggle)
-        actions.add(ttk.Button(actions, text="取消手机授权", command=self.revoke))
-        actions.add(ttk.Button(actions, text="最小化", command=self.minimize))
-        self.status.trace_add("write", self.update_service_presentation)
-        self.page_heading(detection, "客户端与版本", "BILI REMOTE", "查看已安装的客户端，以及当前可用的控制功能。")
-        about = Card(detection, self.ui_scale, padding=14)
-        about.pack(fill="x", pady=(0, self.px(12)))
-        version_line = FlowRow(about, style="Surface.TFrame")
-        version_line.pack(fill="x")
-        version_line.add(ttk.Label(version_line, text="Bili Remote  ·  当前版本 "+APP_VERSION, style="Surface.Heading.TLabel"))
-        self.update_button = version_line.add(ttk.Button(version_line, text="检查更新", command=lambda: self.check_updates(manual=True)))
-        self.update_download_button = version_line.add(ttk.Button(version_line, text="下载新版", command=self.download_update, state="disabled"))
-        self.update_status = tk.StringVar(value="进入本页后在后台检查遥控器新版本。")
-        wrapped_label(about, textvariable=self.update_status, style="Surface.Muted.TLabel").pack(fill="x", pady=(self.px(6), 0))
-        detection_actions = FlowRow(detection)
-        detection_actions.pack(fill="x", pady=(0, self.px(12)))
-        detection_actions.add(ttk.Button(detection_actions, text="重新检测", command=self.refresh_detection))
-        self.inventory_status = tk.StringVar(value="进入本页时检测，后台保持轻量运行。")
-        wrapped_label(detection, textvariable=self.inventory_status, style="Muted.TLabel").pack(anchor="w", pady=(0, self.px(14)))
-        table = Card(detection, self.ui_scale, padding=12, stretch=True)
-        table.pack(fill="both", expand=True)
-        inventory_frame = table.content
-        inventory_frame.rowconfigure(0, weight=1); inventory_frame.columnconfigure(0, weight=1)
-        self.inventory = ttk.Treeview(inventory_frame, columns=("version", "state", "capabilities"), height=6)
-        self.inventory.heading("#0", text="客户端 / 浏览器")
-        self.inventory.column("#0", width=140, minwidth=90)
-        for column, title, width in (("version", "版本", 105), ("state", "状态", 60), ("capabilities", "控制方式", 235)):
-            self.inventory.heading(column, text=title)
-            self.inventory.column(column, width=width, minwidth=55)
-        self.inventory.grid(row=0, column=0, sticky="nsew")
-        self.inventory_empty = wrapped_label(inventory_frame, text="等待检测播放器\n进入本页后自动检查已安装与正在运行的客户端。", style="Surface.Muted.TLabel", justify="center")
-        self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
-        for orient, row, column, sticky, command in (("vertical", 0, 1, "ns", self.inventory.yview), ("horizontal", 1, 0, "ew", self.inventory.xview)):
-            bar = ttk.Scrollbar(inventory_frame, orient=orient, command=command)
-            bar.grid(row=row, column=column, sticky=sticky)
-            self.inventory.configure(**{("y" if orient == "vertical" else "x") + "scrollcommand": bar.set})
-        self.page_heading(records, "操作记录", "BILI REMOTE", "保留本次运行最近 100 条记录，失败原因也会显示在这里。")
-        log_card = Card(records, self.ui_scale, padding=14, stretch=True)
-        log_card.pack(fill="both", expand=True)
-        records_frame = log_card.content
-        records_frame.rowconfigure(0, weight=1); records_frame.columnconfigure(0, weight=1)
-        self.records = tk.Listbox(records_frame, font=(self.font_family, 11), activestyle="none", borderwidth=0, height=4,
-                                  background=SURFACE, foreground=TEXT, selectbackground="#E1EDFF", selectforeground="#0062C9",
-                                  highlightthickness=0, relief="flat")
-        self.records.grid(row=0, column=0, sticky="nsew")
-        self.records_empty = wrapped_label(records_frame, text="还没有遥控操作\n连接手机后，操作与反馈会出现在这里。", style="Surface.Muted.TLabel", justify="center")
-        self.records_empty.place(relx=.5, rely=.5, anchor="center")
-        for orient, row, column, sticky, command in (("vertical", 0, 1, "ns", self.records.yview), ("horizontal", 1, 0, "ew", self.records.xview)):
-            bar = ttk.Scrollbar(records_frame, orient=orient, command=command)
-            bar.grid(row=row, column=column, sticky=sticky)
-            self.records.configure(**{("y" if orient == "vertical" else "x") + "scrollcommand": bar.set})
-        self.page_heading(options, "设置", "BILI REMOTE", "管理启动方式、提示字幕和本机数据。修改会自动保存。")
-        general = self.card(options, "通用")
-        self.autostart = tk.BooleanVar(value=startup_enabled())
-        preference_row(general, "开机自启", "登录 Windows 后自动启动", self.autostart, self.change_startup, self.ui_scale)
-        self.separator(general)
-        self.close_to_tray = tk.BooleanVar(value=self.preferences.values.get("close_to_tray", True))
-        preference_row(general, "关闭后保留在托盘", "后台继续连接，双击托盘图标可返回", self.close_to_tray,
-                       lambda: self.save_preference("close_to_tray", self.close_to_tray.get()), self.ui_scale)
-        feedback = self.card(options, "遥控提示字幕", "操作时在电脑屏幕短暂显示反馈，不打断播放。")
-        self.show_feedback = tk.BooleanVar(value=self.preferences.values.get("show_feedback", True))
-        preference_row(feedback, "开启遥控提示字幕", "关闭后仍可在操作记录中查看反馈", self.show_feedback, self.change_feedback_enabled, self.ui_scale)
-        self.separator(feedback)
-        self.build_feedback_settings(feedback)
-        support = self.card(options, "帮助与管理", "电脑在线时会广播供手机发现，已配对的手机可自动重连。")
-        self.options_status = tk.StringVar()
-        wrapped_label(support, textvariable=self.options_status, style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(6))
-        management = FlowRow(support, style="Surface.TFrame")
-        management.pack(fill="x")
-        for label, action, style in (("打开使用说明", self.open_help, "TButton"), ("卸载 / 清理本机数据", self.uninstall, "Danger.TButton"), ("完全退出", self.close, "TButton")):
-            management.add(ttk.Button(management, text=label, command=action, style=style))
+        shell = QWidget()
+        self.window.setCentralWidget(shell)
+        layout = QHBoxLayout(shell)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(208)
+        side = QVBoxLayout(self.sidebar)
+        side.setContentsMargins(10, 26, 10, 18)
+        side.setSpacing(6)
+        self.brand = label("Bili Remote", "brand")
+        self.brand.setContentsMargins(12, 0, 0, 18)
+        side.addWidget(self.brand)
+        self.nav_heading = label("工作空间", "muted")
+        self.nav_heading.setContentsMargins(12, 0, 0, 10)
+        side.addWidget(self.nav_heading)
+        self.tabs = QStackedWidget()
+        self.navigation, self.pages = [], []
+        self.navigation_group = QButtonGroup(self.window)
+        names = ("连接与播放", "客户端与版本", "操作记录", "设置")
+        descriptions = ("让手机成为遥控器，轻点、滑动或按住即可控制。", "查看遥控器版本，以及当前可用的播放控制功能。",
+                        "保留本次运行最近 100 条操作与失败原因。", "管理启动方式、提示字幕和本机数据。修改会自动保存。")
+        for index, text in enumerate(names):
+            nav = button(text, lambda checked=False, index=index: self.select_page(index), "nav")
+            nav.setCheckable(True)
+            nav.setIcon(navigation_icon(("remote", "devices", "history", "settings")[index]))
+            nav.setToolTip(text+f"  ·  Alt+{index+1}")
+            self.navigation_group.addButton(nav, index)
+            self.navigation.append(nav)
+            side.addWidget(nav)
+            shortcut = QShortcut(QKeySequence(f"Alt+{index+1}"), self.window)
+            shortcut.activated.connect(lambda index=index: self.select_page(index))
+            page = QWidget()
+            page.setObjectName("page")
+            content = QVBoxLayout(page)
+            content.setContentsMargins(16, 24, 16, 24)
+            content.setSpacing(16)
+            content.addWidget(label("BILI REMOTE", "muted"))
+            content.addWidget(label(text, "title"))
+            content.addWidget(label(descriptions[index], "muted"))
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setWidget(page)
+            self.tabs.addWidget(scroll)
+            self.pages.append(page)
+        side.addStretch()
+        self.help_button = button("使用指南  ↗", self.open_help)
+        side.addWidget(self.help_button)
+        self.service_hint = label("●  正在启动", "muted")
+        self.service_hint.setContentsMargins(10, 8, 0, 0)
+        side.addWidget(self.service_hint)
+        layout.addWidget(self.sidebar)
+        layout.addWidget(self.tabs, 1)
+        self.build_connection()
+        self.build_clients()
+        self.build_records()
+        self.build_settings()
+        self.tabs.currentChanged.connect(self.on_page_changed)
+        self.select_page(0)
         self.refresh_pin_label()
         self.resize_navigation()
-        tabs.prepare()
-        self.on_page_changed()
+        escape = QShortcut(QKeySequence("Escape"), self.window)
+        escape.activated.connect(self.end_feedback_preview)
 
-    def px(self, value):
-        return max(1, round(value * self.ui_scale))
+    def add_card(self, index, title=None, description=None):
+        card = Card(title, description)
+        self.pages[index].layout().addWidget(card)
+        return card.layout_box
 
-    def page_heading(self, parent, title, section, subtitle):
-        ttk.Label(parent, text=section.upper(), style="Eyebrow.TLabel").pack(anchor="w", pady=(self.px(3), self.px(8)))
-        wrapped_label(parent, text=title, style="Title.TLabel").pack(anchor="w")
-        wrapped_label(parent, text=subtitle, style="Muted.TLabel").pack(anchor="w", pady=(self.px(8), self.px(25)))
-
-    def card(self, parent, title, subtitle=None):
-        card = Card(parent, self.ui_scale)
-        card.pack(fill="x", pady=(0, self.px(15)))
-        ttk.Label(card.content, text=title, style="Surface.Heading.TLabel").pack(anchor="w")
-        if subtitle:
-            wrapped_label(card.content, text=subtitle, style="Surface.Muted.TLabel").pack(anchor="w", pady=(self.px(6), 0))
-        return card.content
-
-    def separator(self, parent):
-        line = tk.Frame(parent, background=LINE, height=1)
-        line.pack(fill="x", pady=self.px(4))
-
-    def resize_navigation(self, event=None):
-        if event is not None and event.widget is not self.window:
-            return
-        width, height = self.window.winfo_width(), self.window.winfo_height()
-        if width <= 1:
-            width, height = getattr(self.window, "initial_layout_size", (self.px(1040), self.px(780)))
-        compact = width < self.px(880)
-        short = height < self.px(560)
-        if (compact, short) == (self.compact_navigation, self.short_navigation):
-            return
-        self.compact_navigation, self.short_navigation = compact, short
-        self.sidebar.configure(width=self.px(70 if compact else 208))
-        self.brand.pack_configure(padx=self.px(17 if compact else 18), pady=(self.px(16 if short else 30), self.px(18 if short else 34)))
-        if compact:
-            self.brand_text.pack_forget()
+    def add_action(self, layout, text, action, kind=None):
+        control = button(text, action, kind)
+        if isinstance(layout, FlowLayout):
+            layout.addWidget(control)
         else:
-            self.brand_text.pack(side="left", padx=(self.px(9), 0))
-        if compact or short:
-            self.nav_heading.pack_forget()
-        else:
-            self.nav_heading.pack(anchor="w", padx=self.px(22), pady=(0, self.px(10)), before=self.navigation[0][0])
-        for button, name in self.navigation:
-            button.set_compact(compact)
-        self.sidebar_footer.pack_configure(padx=self.px(8 if compact else 14), pady=self.px(12 if short else 20))
-        self.help_button.configure(text="?" if compact else "使用指南  ↗")
-        if short:
-            self.help_button.pack_forget()
-        else:
-            self.help_button.pack(fill="x", pady=(0, self.px(16)), before=self.service_label)
-        self.update_service_presentation()
+            layout.addWidget(control, alignment=Qt.AlignmentFlag.AlignLeft)
+        return control
 
-    def on_page_changed(self, event=None):
-        current = self.tabs.index(self.tabs.select())
-        if current == self.active_navigation:
+    def build_connection(self):
+        connection_card = self.add_card(0)
+        columns = ResponsiveColumns()
+        connection_card.addWidget(columns)
+        connection, pairing = columns.left, columns.right
+        connection.addWidget(label("连接你的手机", "heading"))
+        connection.addWidget(label("两端接入同一局域网，在手机中选择这台电脑。", "muted"))
+        self.status = label("正在启动…")
+        self.addresses = label("", "muted")
+        connection.addWidget(self.status)
+        connection.addWidget(self.addresses)
+        pairing.addWidget(label("首次连接配对码", "muted"))
+        self.pin_text = label("", "pin", False)
+        pairing.addWidget(self.pin_text)
+        self.add_action(pairing, "刷新配对码", self.refresh_pin)
+        pairing.addWidget(label("配对一次，以后自动重连。配对码每 10 分钟更新。", "muted"))
+        connection.addStretch()
+        pairing.addStretch()
+        player = self.add_card(0, "播放视频", "打开专用播放窗口，选择你想看的视频。")
+        self.add_action(player, "打开哔哩哔哩 · 无需扩展", self.open_browser, "primary")
+        player.addWidget(label("专用 Edge / Chrome 窗口支持完整遥控。Windows 客户端请手动打开，可用功能取决于客户端接口。", "muted"))
+        recent = self.add_card(0, "最近一次操作")
+        self.last_operation = label("尚无遥控操作", "muted")
+        recent.addWidget(self.last_operation)
+        actions = self.action_row(self.pages[0].layout())
+        self.toggle = self.add_action(actions, "停止服务", self.toggle_service)
+        self.add_action(actions, "取消手机授权", self.revoke)
+        self.add_action(actions, "最小化", self.minimize)
+        self.pages[0].layout().addStretch()
+
+    def build_clients(self):
+        about = self.add_card(1, "Bili Remote  ·  当前版本 "+APP_VERSION)
+        actions = self.action_row(about)
+        self.update_button = self.add_action(actions, "检查更新", lambda: self.check_updates(manual=True))
+        self.update_download_button = self.add_action(actions, "下载新版", self.download_update)
+        self.update_download_button.setEnabled(False)
+        self.update_status = label("进入本页后在后台检查遥控器新版本。", "muted")
+        about.addWidget(self.update_status)
+        clients = self.add_card(1)
+        self.add_action(clients, "重新检测", self.refresh_detection)
+        self.inventory_status = label("进入本页时检测，后台保持轻量运行。", "muted")
+        clients.addWidget(self.inventory_status)
+        self.inventory = QTableWidget(0, 4)
+        self.inventory.setHorizontalHeaderLabels(("客户端 / 浏览器", "版本", "状态", "控制方式"))
+        self.inventory.verticalHeader().hide()
+        self.inventory.setShowGrid(False)
+        self.inventory.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.inventory.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.inventory.setMinimumHeight(240)
+        self.inventory.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.inventory.horizontalHeader().setStretchLastSection(True)
+        for index, width in enumerate((165, 110, 75, 230)):
+            self.inventory.setColumnWidth(index, width)
+        clients.addWidget(self.inventory)
+        self.pages[1].layout().addStretch()
+
+    def build_records(self):
+        records = self.add_card(2)
+        self.records = QListWidget()
+        self.records.setMinimumHeight(280)
+        self.records.setWordWrap(True)
+        records.addWidget(self.records)
+
+    def preference_row(self, layout, text, description, checked, action):
+        row = QHBoxLayout()
+        words = QVBoxLayout()
+        words.addWidget(label(text))
+        words.addWidget(label(description, "muted"))
+        row.addLayout(words, 1)
+        switch = Switch(text, checked, action)
+        row.addWidget(switch)
+        layout.addLayout(row)
+        return switch
+
+    def build_settings(self):
+        general = self.add_card(3, "通用")
+        self.autostart = self.preference_row(general, "开机自启", "登录 Windows 后自动启动", startup_enabled(), self.change_startup)
+        self.close_to_tray = self.preference_row(general, "关闭后保留在托盘", "后台继续连接，双击托盘图标可返回",
+            self.preferences.values.get("close_to_tray", True), lambda value: self.save_preference("close_to_tray", value))
+        feedback = self.add_card(3, "遥控提示字幕", "操作时在电脑屏幕短暂显示反馈，不打断播放。")
+        self.show_feedback = self.preference_row(feedback, "开启遥控提示字幕", "关闭后仍可在操作记录中查看反馈",
+            self.preferences.values.get("show_feedback", True), self.change_feedback_enabled)
+        self.subtitle_preview = SubtitlePreview()
+        self.subtitle_preview.moved.connect(self.drag_feedback_position)
+        feedback.addWidget(self.subtitle_preview)
+        feedback.addWidget(label("拖动字幕调整位置 · 方向键微调 · 自动保存", "muted"))
+        preview_actions = self.action_row(feedback)
+        self.preview_button = self.add_action(preview_actions, "在屏幕上拖动字幕", self.preview_feedback)
+        reset = self.add_action(preview_actions, "恢复默认", self.reset_feedback_style)
+        self.feedback_positions = {"左上": (5, 5), "上方居中": (50, 5), "右上": (95, 5), "左侧居中": (5, 50),
+            "屏幕中央": (50, 50), "右侧居中": (95, 50), "左下": (5, 88), "下方居中": (50, 88), "右下": (95, 88)}
+        self.feedback_position = QComboBox()
+        self.feedback_position.addItems([*self.feedback_positions, "自定义"])
+        self.feedback_position.activated.connect(self.choose_feedback_position)
+        feedback.addWidget(label("位置预设"))
+        feedback.addWidget(self.feedback_position)
+        self.feedback_controls = [self.preview_button, reset, self.feedback_position]
+        self.feedback_vars, self.feedback_readouts = {}, {}
+        for key, title in (("x", "水平位置"), ("y", "垂直位置"), ("opacity", "不透明度")):
+            caption = label(title)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(10 if key == "opacity" else 0, 100)
+            slider.setAccessibleName(title)
+            slider.valueChanged.connect(self.feedback_style_edited)
+            feedback.addWidget(caption)
+            feedback.addWidget(slider)
+            self.feedback_vars[key], self.feedback_readouts[key] = slider, (caption, title)
+            self.feedback_controls.append(slider)
+        feedback.addWidget(label("字号（10–64 pt）"))
+        size = QSpinBox()
+        size.setRange(10, 64)
+        size.setAccessibleName("字幕字号")
+        size.valueChanged.connect(self.feedback_style_edited)
+        feedback.addWidget(size)
+        feedback.addWidget(label("文字颜色"))
+        color = QLineEdit()
+        color.setMaxLength(7)
+        color.setAccessibleName("字幕颜色，十六进制 RGB")
+        color.textChanged.connect(self.feedback_style_edited)
+        color.editingFinished.connect(self.finish_feedback_edit)
+        feedback.addWidget(color)
+        chooser = self.add_action(feedback, "选择颜色", self.choose_feedback_color)
+        self.feedback_vars.update(font_size=size, color=color)
+        self.feedback_controls.extend((size, color, chooser))
+        feedback.addWidget(label("预览持续显示样式与位置；屏幕预览展示实际字号和透明度。按 Esc 或离开设置结束屏幕预览。", "muted"))
+        support = self.add_card(3, "帮助与管理", "电脑在线时会广播供手机发现，已配对的手机可自动重连。")
+        self.options_status = label("", "muted")
+        support.addWidget(self.options_status)
+        management = self.action_row(support)
+        for text, action, kind in (("打开使用说明", self.open_help, None), ("卸载 / 清理本机数据", self.uninstall, "danger"), ("完全退出", self.close, None)):
+            self.add_action(management, text, action, kind)
+        self.sync_feedback_controls()
+
+    def select_page(self, index):
+        self.tabs.setCurrentIndex(index)
+        self.on_page_changed(index)
+
+    def on_page_changed(self, index):
+        if index == self.active_navigation:
             return
-        if current != 3:
+        if index != 3:
             self.end_feedback_preview()
-        for index in {self.active_navigation, current} - {None}:
-            button, name = self.navigation[index]
-            selected = index == current
-            button.set_selected(selected)
-        self.navigation_selection.select(current)
-        self.active_navigation = current
+        self.active_navigation = index
+        self.navigation[index].setChecked(True)
         self.update_inventory_visibility()
 
-    def update_service_presentation(self, *args):
-        value = self.status.get()
-        color, hint = "#27835E", "服务在线"
-        if "失败" in value:
-            color, hint = "#C23B45", "服务异常"
-        elif "正在启动" in value or "正在停止" in value:
-            color, hint = "#9A6A18", "正在启动" if "启动" in value else "正在停止"
-        elif "已停止" in value or "请先启动" in value:
-            color, hint = MUTED, "服务已停止"
-        elif value.startswith("手机已连接"):
-            hint = "手机已连接"
-        self.service_hint.set("●" if self.compact_navigation else "●  " + hint)
-        self.service_label.configure(foreground=color)
-        self.status_label.configure(foreground=color)
+    def resize_navigation(self):
+        if not hasattr(self, "help_button"):
+            return
+        compact = self.window.width() < 880
+        short = self.window.height() < 560
+        if compact != self.compact_navigation:
+            self.compact_navigation = compact
+            self.sidebar.setFixedWidth(70 if compact else 208)
+            self.brand.setText("BR" if compact else "Bili Remote")
+            for nav, text in zip(self.navigation, ("连接与播放", "客户端与版本", "操作记录", "设置")):
+                nav.setText("" if compact else text)
+            self.help_button.setText("?" if compact else "使用指南  ↗")
+        self.nav_heading.setVisible(not compact and not short)
+        self.brand.setVisible(not short)
+        self.help_button.setVisible(not short)
+
+    def action_row(self, layout):
+        row = QWidget()
+        flow = FlowLayout(row)
+        layout.addWidget(row)
+        return flow
+
+    def update_inventory_visibility(self):
+        visible = self.window.isVisible() and not self.window.isMinimized() and self.tabs.currentIndex() == 1
+        if visible and not self.inventory_visible.is_set():
+            self.inventory_visible.set()
+            self.refresh_detection(False)
+            if not self.update_started and not self.hidden:
+                self.check_updates()
+        elif not visible:
+            self.inventory_visible.clear()
 
     def refresh_pin_label(self):
         code = self.pairing.current()
-        formatted = code[:3] + " " + code[3:]
-        if formatted != self.pin_text.get():
-            self.pin_text.set(formatted)
-
-    def build_feedback_settings(self, parent):
-        frame = ttk.Frame(parent, style="Surface.TFrame")
-        self.feedback_frame = frame
-        frame.pack(fill="x", pady=(self.px(14), 0))
-        ttk.Label(frame, text="提示字幕样式", style="Surface.Heading.TLabel").pack(anchor="w", pady=(0, self.px(12)))
-        self.feedback_controls = []
-        self.feedback_vars = {key: (tk.StringVar if key == "color" else tk.IntVar if key == "font_size" else tk.DoubleVar)(value=value) for key, value in self.feedback_style.items()}
-        self.feedback_readouts = {}
-        self.feedback_positions = {"左上": (5, 5), "上方居中": (50, 5), "右上": (95, 5),
-                                   "左侧居中": (5, 50), "屏幕中央": (50, 50), "右侧居中": (95, 50),
-                                   "左下": (5, 88), "下方居中": (50, 88), "右下": (95, 88)}
-        self.feedback_position = tk.StringVar(value="自定义")
-        self.subtitle_preview = SubtitlePreview(frame, self.ui_scale, self.drag_feedback_position)
-        self.subtitle_preview.pack(fill="x", pady=(0, self.px(18)))
-        preview_actions = FlowRow(frame, style="Surface.TFrame")
-        preview_actions.pack(fill="x", pady=(0, self.px(14)))
-        self.preview_button_text = tk.StringVar(value="在屏幕上拖动字幕")
-        self.feedback_controls.append(preview_actions.add(ttk.Button(preview_actions, textvariable=self.preview_button_text, command=self.preview_feedback)))
-        self.feedback_controls.append(preview_actions.add(ttk.Button(preview_actions, text="恢复默认", command=self.reset_feedback_style)))
-        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(3))
-        row.add(ttk.Label(row, text="位置预设", style="Surface.TLabel"))
-        preset = row.add(ttk.Combobox(row, textvariable=self.feedback_position, values=[*self.feedback_positions, "自定义"], state="readonly", width=12))
-        preset.bind("<<ComboboxSelected>>", self.choose_feedback_position)
-        self.feedback_controls.append(preset)
-        for key in ("x", "y", "opacity"):
-            line = ttk.Frame(frame, style="Surface.TFrame"); line.pack(fill="x", pady=self.px(10))
-            caption = tk.StringVar(); self.feedback_readouts[key] = caption
-            ttk.Label(line, textvariable=caption, style="Surface.TLabel").pack(anchor="w")
-            control = ttk.Scale(line, from_=10 if key == "opacity" else 0, to=100, variable=self.feedback_vars[key])
-            control.pack(fill="x", pady=(5, 0)); self.feedback_controls.append(control)
-        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(5))
-        row.add(ttk.Label(row, text="字号（10–64 pt）", style="Surface.TLabel"))
-        control = row.add(ttk.Spinbox(row, from_=10, to=64, increment=1, width=6, textvariable=self.feedback_vars["font_size"]))
-        control.bind("<FocusOut>", self.finish_feedback_edit)
-        control.bind("<Return>", self.finish_feedback_edit)
-        self.feedback_controls.append(control)
-        row = FlowRow(frame, style="Surface.TFrame"); row.pack(fill="x", pady=self.px(5))
-        row.add(ttk.Label(row, text="文字颜色", style="Surface.TLabel"))
-        color = row.add(ttk.Entry(row, textvariable=self.feedback_vars["color"], width=10))
-        color.bind("<FocusOut>", self.finish_feedback_edit)
-        color.bind("<Return>", self.finish_feedback_edit)
-        chooser = row.add(ttk.Button(row, text="选择颜色", command=self.choose_feedback_color))
-        self.feedback_controls.extend([color, chooser])
-        wrapped_label(frame, text="上方预览持续显示样式与位置；屏幕预览展示实际字号和透明度。拖动后自动保存，按 Esc 或离开设置结束屏幕预览。", style="Surface.Muted.TLabel").pack(anchor="w", pady=self.px(12))
-        for variable in self.feedback_vars.values():
-            variable.trace_add("write", self.feedback_style_edited)
-        self.update_feedback_labels()
-        self.set_feedback_controls_state()
-
-    def update_feedback_labels(self):
-        for key, caption in self.feedback_readouts.items():
-            value = self.feedback_style[key]
-            text = f"{'水平位置' if key == 'x' else '垂直位置' if key == 'y' else '不透明度'}  {value}%"
-            if caption.get() != text:
-                caption.set(text)
-        pair = self.feedback_style["x"], self.feedback_style["y"]
-        position = next((name for name, position in self.feedback_positions.items() if position == pair), "自定义")
-        if self.feedback_position.get() != position:
-            self.feedback_position.set(position)
-
-    def feedback_style_edited(self, *args):
-        if self.feedback_dragging:
-            return
-        values = dict(self.feedback_style)
-        for key, variable in self.feedback_vars.items():
-            try:
-                values[key] = variable.get()
-            except tk.TclError:
-                return  # A partially typed size is not a complete setting yet.
-        normalized = normalize_style(values)
-        if normalized["color"] != str(values["color"]).upper():
-            return  # Preserve the last valid color while the hex field is typed.
-        if normalized == self.feedback_style:
-            return
-        self.feedback_style = normalized
-        self.update_feedback_labels()
-        if self.overlay:
-            self.overlay.set_style(self.feedback_style)
-        if self.feedback_editor:
-            self.feedback_editor.set_style(self.feedback_style)
-        self.subtitle_preview.set_style(self.feedback_style, self.show_feedback.get())
-        if self.feedback_save_timer:
-            self.window.after_cancel(self.feedback_save_timer)
-        self.feedback_save_timer = self.window.after(250, self.flush_feedback_style)
-
-    def flush_feedback_style(self):
-        if self.feedback_save_timer:
-            self.window.after_cancel(self.feedback_save_timer)
-            self.feedback_save_timer = None
-        self.save_preference("feedback_style", self.feedback_style)
-
-    def finish_feedback_edit(self, event=None):
-        self.feedback_style_edited()
-        for key in ("font_size", "color"):
-            self.feedback_vars[key].set(self.feedback_style[key])
-        self.flush_feedback_style()
-
-    def choose_feedback_position(self, event=None):
-        position = self.feedback_positions.get(self.feedback_position.get())
-        if position:
-            self.feedback_vars["x"].set(position[0]); self.feedback_vars["y"].set(position[1])
-
-    def choose_feedback_color(self):
-        color = colorchooser.askcolor(color=self.feedback_style["color"], title="提示字幕颜色", parent=self.window)[1]
-        if color:
-            self.feedback_vars["color"].set(color)
-
-    def reset_feedback_style(self):
-        for key, value in DEFAULT_STYLE.items():
-            self.feedback_vars[key].set(value)
-        self.flush_feedback_style()
-
-    def set_feedback_controls_state(self):
-        for widget in self.feedback_controls:
-            widget.state(["!disabled"] if self.show_feedback.get() else ["disabled"])
-        self.subtitle_preview.set_style(self.feedback_style, self.show_feedback.get())
-
-    def change_feedback_enabled(self):
-        self.save_preference("show_feedback", self.show_feedback.get())
-        self.set_feedback_controls_state()
-        if not self.show_feedback.get() and self.overlay:
-            self.overlay.close(); self.overlay = None
-        if not self.show_feedback.get():
-            self.end_feedback_preview()
-
-    def show_overlay(self, text, success=True):
-        if not self.show_feedback.get():
-            return
-        try:
-            if self.overlay is None:
-                self.overlay = OperationOverlay(self.window, self.feedback_style)
-            self.overlay.show(text, success)
-        except (OSError, tk.TclError) as exc:
-            logging.warning("提示字幕不可用：%s", exc)
-            if self.overlay:
-                with contextlib.suppress(tk.TclError):
-                    self.overlay.close()
-                self.overlay = None
-
-    def preview_feedback(self):
-        self.finish_feedback_edit()
-        if self.feedback_editor:
-            self.end_feedback_preview()
-        elif self.show_feedback.get():
-            try:
-                self.feedback_editor = OperationOverlay(self.window, self.feedback_style, self.drag_feedback_position)
-                self.feedback_editor.show("拖动调整位置 · 临时 2 倍速")
-                self.preview_button_text.set("结束屏幕预览")
-            except (OSError, tk.TclError) as exc:
-                self.end_feedback_preview()
-                self.options_status.set(f"屏幕预览不可用：{exc}")
-
-    def drag_feedback_position(self, x, y):
-        self.feedback_dragging = True
-        try:
-            self.feedback_vars["x"].set(x)
-            self.feedback_vars["y"].set(y)
-        finally:
-            self.feedback_dragging = False
-        self.feedback_style_edited()
-
-    def end_feedback_preview(self):
-        if self.feedback_editor:
-            self.feedback_editor.close()
-            self.feedback_editor = None
-        if hasattr(self, "preview_button_text"):
-            self.preview_button_text.set("在屏幕上拖动字幕")
+        self.pin_text.setText(code[:3]+" "+code[3:])
 
     def refresh_pin(self):
         self.pairing.rotate()
         self.refresh_pin_label()
 
     def start(self):
-        if self.thread and self.thread.is_alive():
-            return
-        self.request_stop = False
-        self.toggle.config(text="停止服务")
-        self.status.set("正在启动…")
-        self.thread = threading.Thread(target=self.worker, daemon=True)
-        self.thread.start()
+        self.toggle.setText("停止服务")
+        self.set_status("正在启动…")
+        self.start_service()
 
-    def worker(self):
-        try:
-            asyncio.run(self.serve())
-        except Exception as exc:
-            logging.exception("电脑服务失败")
-            self.events.put(("error", f"服务启动失败：{exc}；请检查端口 8765 / 8766 是否被占用。"))
-        finally:
-            self.events.put(("stopped", None))
+    def stop(self):
+        self.stop_service()
+        self.set_status("正在停止服务…")
 
-    async def serve(self):
-        self.loop = asyncio.get_running_loop()
-        self.stop_event, self.detection_request = asyncio.Event(), asyncio.Event()
-        self.inventory_signature = None
-        if self.inventory_visible.is_set():
-            self.detection_request.set()
-        if self.closing or self.request_stop:
-            self.stop_event.set()
-        self.relay = Relay(trust=TrustStore(self.trust_path), pairing=self.pairing, notify=lambda text: self.events.put(("status", text)), feedback=lambda event: self.events.put(("operation", event)))
-        discovery = None
-        watchdog = asyncio.create_task(self.relay.watchdog())
-        monitor = asyncio.create_task(self.monitor_targets())
-        try:
-            host = os.environ.get("BILI_REMOTE_BIND_HOST", "0.0.0.0")
-            async with serve(self.relay.handle, host, self.port, process_request=self.relay.http, max_size=16_384, ping_interval=10, ping_timeout=5, close_timeout=2) as server:
-                discovery = await start_discovery(self.relay.trust.public_info(self.port), host=host, port=self.discovery_port)
-                self.events.put(("status", "电脑已在线 · 等待手机连接"))
-                addresses = sorted({r[4][0] for r in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET) if not r[4][0].startswith("127.")})
-                self.events.put(("addresses", socket.gethostname() + " · " + " / ".join(addresses)))
-                await self.stop_event.wait()
-                await self.relay.close()
-                server.close()
-        finally:
-            if discovery:
-                discovery.close()
-            for task in (watchdog, monitor):
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            self.loop = None
+    def toggle_service(self):
+        self.stop() if self.thread and self.thread.is_alive() else self.start()
 
-    async def monitor_targets(self):
-        while True:
-            if not self.inventory_visible.is_set() and not self.detection_request.is_set():
-                await self.detection_request.wait()
-            force = self.inventory_force.is_set()
-            self.inventory_force.clear()
-            self.detection_request.clear()
-            try:
-                installed, running = await asyncio.to_thread(self.detector.scan, force)
-                sessions = []
-                # Loading the WinRT media DLLs for a browser-only table used
-                # to cause a Python-wide import pause and retain unused DLLs.
-                native = self.relay.native
-                if installed or any(row["kind"] == "client" for row in running) or native.manager is not None:
-                    try:
-                        sessions = (await asyncio.wait_for(native.discover(), 3))["sessions"]
-                    except Exception:
-                        pass
-                browser = self.relay.browser
-                name = browser.executable.name.lower() if browser.running and browser.executable else ""
-                rows = combine(installed, running, sessions, name)
-                if rows != self.inventory_signature:
-                    self.inventory_signature = rows
-                    self.events.put(("inventory", rows))
-                self.events.put(("inventory_done", len(rows)))
-            except Exception as exc:
-                logging.warning("客户端检测失败：%s", exc)
-                self.events.put(("inventory_error", "播放器检测失败，请重试。"))
-            try:
-                await asyncio.wait_for(self.detection_request.wait(), 15)
-            except asyncio.TimeoutError:
-                pass
+    def set_status(self, text):
+        self.status.setText(text)
+        self.service_hint.setText("●  "+("服务已停止" if text == "服务已停止" else "服务异常" if "失败" in text else "正在启动" if "正在启动" in text else "服务在线"))
 
     def refresh_detection(self, manual=True):
-        self.inventory_status.set("正在检测…")
+        self.inventory_status.setText("正在检测…")
         if manual:
             self.inventory_force.set()
         if self.loop and self.detection_request:
             self.loop.call_soon_threadsafe(self.detection_request.set)
 
-    def update_inventory_visibility(self, event=None):
-        if event is not None and event.widget is not self.window:
-            return
-        visible = self.window.state() not in {"withdrawn", "iconic"} and self.tabs.select() == str(self.detection_page)
-        if visible and not self.inventory_visible.is_set():
-            self.inventory_visible.set()
-            self.refresh_detection(manual=False)
-            if not self.update_started and not self.hidden:
-                self.window.after_idle(self.check_updates)
-        elif not visible:
-            self.inventory_visible.clear()
-
     def check_updates(self, manual=False):
         if self.update_busy or self.closing:
             return
         self.update_busy = self.update_started = True
-        self.update_status.set("正在检查遥控器新版本…")
-        self.update_button.state(["disabled"])
+        self.update_button.setEnabled(False)
+        self.update_status.setText("正在检查遥控器新版本…")
         cache = self.preferences.values.get("update_cache")
         def work():
             try:
@@ -625,15 +424,14 @@ class Companion:
     def show_update_result(self, result):
         from .updates import version_tuple
         self.update_busy = False
-        self.update_button.state(["!disabled"])
+        self.update_button.setEnabled(True)
         latest = result["version"]
         newer = version_tuple(latest) > version_tuple(APP_VERSION)
         self.update_download = result["download_url"] if newer else ""
-        self.update_download_button.state(["!disabled"] if newer else ["disabled"])
-        message = "发现新版本 "+latest+" · 当前 "+APP_VERSION if newer else (
-            "已是最新正式版 · "+APP_VERSION if version_tuple(latest) == version_tuple(APP_VERSION)
-            else "当前版本 "+APP_VERSION+" · 最新正式版 "+latest)
-        self.update_status.set(message+("（缓存结果）" if result["cached"] else ""))
+        self.update_download_button.setEnabled(newer)
+        text = "发现新版本 "+latest+" · 当前 "+APP_VERSION if newer else (
+            "已是最新正式版 · "+APP_VERSION if version_tuple(latest) == version_tuple(APP_VERSION) else "当前版本 "+APP_VERSION+" · 最新正式版 "+latest)
+        self.update_status.setText(text+("（缓存结果）" if result["cached"] else ""))
         with contextlib.suppress(OSError):
             self.preferences.set("update_cache", result["cache"])
 
@@ -642,9 +440,34 @@ class Companion:
             import webbrowser
             webbrowser.open(self.update_download)
 
+    def display_inventory(self, rows):
+        selected = self.inventory.currentRow()
+        selected_key = self.inventory.item(selected, 0).data(Qt.ItemDataRole.UserRole) if selected >= 0 else None
+        wanted = []
+        self.inventory.setUpdatesEnabled(False)
+        try:
+            self.inventory.setRowCount(len(rows))
+            for index, row in enumerate(rows):
+                key = (row["kind"], row.get("path", ""), row["name"])
+                wanted.append(key)
+                values = (row.get("installed_name", row["name"]), row["version"], "运行中" if row["running"] else "已安装", row["capabilities"])
+                for column, value in enumerate(values):
+                    item = self.inventory.item(index, column)
+                    if item is None:
+                        item = QTableWidgetItem()
+                        self.inventory.setItem(index, column, item)
+                    if item.text() != value:
+                        item.setText(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, key)
+            if selected_key in wanted:
+                self.inventory.selectRow(wanted.index(selected_key))
+        finally:
+            self.inventory.setUpdatesEnabled(True)
+
     def open_browser(self):
         if not self.loop or not self.relay:
-            self.status.set("请先启动电脑服务")
+            self.set_status("请先启动电脑服务")
             return
         async def open_window():
             try:
@@ -656,190 +479,254 @@ class Companion:
                 self.events.put(("operation", {"ok": False, "text": str(exc), "cmd": "open_browser"}))
         asyncio.run_coroutine_threadsafe(open_window(), self.loop)
 
-    def change_startup(self):
-        try:
-            set_startup(self.autostart.get())
-            self.options_status.set("已启用开机自启" if self.autostart.get() else "已关闭开机自启")
-        except OSError as exc:
-            self.autostart.set(startup_enabled())
-            self.options_status.set(f"启动项设置失败：{exc}")
+    def revoke(self):
+        if self.loop and self.relay:
+            asyncio.run_coroutine_threadsafe(self.relay.revoke_all(), self.loop)
+            self.set_status("手机授权已取消，下次需重新输入配对码")
 
     def save_preference(self, name, value):
         try:
             self.preferences.set(name, value)
         except OSError as exc:
-            self.options_status.set(f"设置保存失败：{exc}")
+            self.options_status.setText(f"设置保存失败：{exc}")
+
+    def change_startup(self, checked):
+        try:
+            set_startup(checked)
+            self.options_status.setText("已启用开机自启" if checked else "已关闭开机自启")
+        except OSError as exc:
+            self.autostart.setChecked(startup_enabled())
+            self.options_status.setText(f"启动项设置失败：{exc}")
+
+    def sync_feedback_controls(self):
+        for key, widget in self.feedback_vars.items():
+            with QSignalBlocker(widget):
+                widget.setText(self.feedback_style[key]) if key == "color" else widget.setValue(self.feedback_style[key])
+        for key, (caption, text) in self.feedback_readouts.items():
+            caption.setText(f"{text}  {self.feedback_style[key]}%")
+        pair = self.feedback_style["x"], self.feedback_style["y"]
+        self.feedback_position.setCurrentText(next((name for name, value in self.feedback_positions.items() if value == pair), "自定义"))
+        enabled = self.show_feedback.isChecked()
+        for widget in self.feedback_controls:
+            widget.setEnabled(enabled)
+        self.subtitle_preview.set_style(self.feedback_style, enabled)
+
+    def feedback_style_edited(self, *args):
+        values = {key: widget.text() if key == "color" else widget.value() for key, widget in self.feedback_vars.items()}
+        if len(values) != len(DEFAULT_STYLE):
+            return
+        normalized = normalize_style(values)
+        if normalized["color"] != values["color"].upper() or normalized == self.feedback_style:
+            return
+        self.feedback_style = normalized
+        for key, (caption, text) in self.feedback_readouts.items():
+            caption.setText(f"{text}  {normalized[key]}%")
+        pair = normalized["x"], normalized["y"]
+        self.feedback_position.setCurrentText(next((name for name, value in self.feedback_positions.items() if value == pair), "自定义"))
+        self.subtitle_preview.set_style(normalized, self.show_feedback.isChecked())
+        for overlay in (self.overlay, self.feedback_editor):
+            if overlay:
+                overlay.set_style(normalized)
+        self.feedback_save_timer.start(250)
+
+    def flush_feedback_style(self):
+        self.feedback_save_timer.stop()
+        self.save_preference("feedback_style", self.feedback_style)
+
+    def finish_feedback_edit(self):
+        self.feedback_style_edited()
+        self.sync_feedback_controls()
+        self.flush_feedback_style()
+
+    def drag_feedback_position(self, x, y):
+        for key, value in (("x", x), ("y", y)):
+            with QSignalBlocker(self.feedback_vars[key]):
+                self.feedback_vars[key].setValue(value)
+        self.feedback_style_edited()
+
+    def choose_feedback_position(self, *args):
+        pair = self.feedback_positions.get(self.feedback_position.currentText())
+        if pair:
+            self.drag_feedback_position(*pair)
+
+    def choose_feedback_color(self):
+        color = QColorDialog.getColor(QColor(self.feedback_style["color"]), self.window, "提示字幕颜色")
+        if color.isValid():
+            self.feedback_vars["color"].setText(color.name().upper())
+
+    def reset_feedback_style(self):
+        self.feedback_style = dict(DEFAULT_STYLE)
+        self.sync_feedback_controls()
+        for overlay in (self.overlay, self.feedback_editor):
+            if overlay:
+                overlay.set_style(self.feedback_style)
+        self.flush_feedback_style()
+
+    def change_feedback_enabled(self, checked):
+        self.save_preference("show_feedback", checked)
+        self.sync_feedback_controls()
+        if not checked:
+            if self.overlay:
+                self.overlay.close()
+                self.overlay.deleteLater()
+                self.overlay = None
+            self.end_feedback_preview()
+
+    def preview_feedback(self):
+        self.finish_feedback_edit()
+        if self.feedback_editor:
+            self.end_feedback_preview()
+        elif self.show_feedback.isChecked():
+            self.feedback_editor = OperationOverlay(self.window, self.feedback_style, self.drag_feedback_position)
+            self.feedback_editor.show_text("拖动调整位置 · 临时 2 倍速")
+            self.preview_button.setText("结束屏幕预览")
+
+    def end_feedback_preview(self):
+        if self.feedback_editor:
+            self.feedback_editor.close()
+            self.feedback_editor.deleteLater()
+            self.feedback_editor = None
+        if hasattr(self, "preview_button"):
+            self.preview_button.setText("在屏幕上拖动字幕")
+
+    def show_overlay(self, text, success=True):
+        if not self.show_feedback.isChecked():
+            return
+        if self.overlay is None:
+            self.overlay = OperationOverlay(self.window, self.feedback_style)
+        self.overlay.show_text(text, success)
+
+    def display_operations(self, operations):
+        self.last_operation.setText(operations[-1]["text"])
+        timestamp = time.strftime("%H:%M:%S")
+        for event in operations:
+            item = QListWidgetItem(timestamp+"  "+("" if event["ok"] else "失败 · ")+event["text"])
+            if not event["ok"]:
+                item.setForeground(QColor("#C23B45"))
+            self.records.insertItem(0, item)
+        while self.records.count() > 100:
+            self.records.takeItem(100)
+        newest = list(reversed(operations))
+        feedback = next((event for event in newest if not event["ok"] or event.get("cmd") not in {"volume", "seek_to"}), newest[0])
+        now = time.monotonic()
+        if not self.hidden and self.show_feedback.isChecked() and (feedback.get("cmd") not in {"volume", "seek_to"} or now-self.last_overlay_time > .15):
+            self.show_overlay(feedback["text"], feedback["ok"])
+            self.last_overlay_time = now
+
+    def poll(self):
+        self.refresh_pin_label()
+        deadline, handled, operations = time.monotonic()+.008, 0, []
+        while handled < 32 and time.monotonic() < deadline:
+            try:
+                kind, payload = self.events.get_nowait()
+            except queue.Empty:
+                break
+            handled += 1
+            if kind in {"status", "error"}:
+                self.set_status(payload)
+            elif kind == "addresses":
+                self.addresses.setText(payload)
+            elif kind == "operation":
+                operations.append(payload)
+            elif kind == "inventory":
+                self.display_inventory(payload)
+            elif kind == "inventory_done":
+                self.inventory_status.setText(f"检测到 {payload} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
+            elif kind == "inventory_error":
+                self.inventory_status.setText(payload)
+            elif kind == "update_result":
+                self.show_update_result(payload)
+            elif kind == "update_error":
+                self.update_busy = False
+                self.update_button.setEnabled(True)
+                self.update_status.setText("检查更新失败："+payload)
+            elif kind == "show":
+                self.show()
+            elif kind == "quit":
+                self.close()
+            elif kind == "stopped":
+                self.toggle.setText("启动服务")
+                if not self.status.text().startswith("服务启动失败"):
+                    self.set_status("服务已停止")
+        if operations:
+            self.display_operations(operations)
+        self.poll_timer.setInterval(16 if not self.events.empty() else 50)
+        if self.closing and (not self.thread or not self.thread.is_alive()):
+            self.dispose()
+            self.app.quit()
 
     def show(self):
         if not self.hidden:
-            self.window.deiconify()
-            self.window.lift()
+            self.window.showNormal()
+            self.window.raise_()
+            self.window.activateWindow()
             self.update_inventory_visibility()
 
     def minimize(self):
         self.inventory_visible.clear()
-        if self.tray and self.tray.visible:
-            self.window.withdraw()
+        self.end_feedback_preview()
+        if self.tray and self.tray.isVisible():
+            self.window.hide()
         elif not self.hidden:
-            self.window.iconify()
+            self.window.showMinimized()
 
     def on_close_window(self):
-        if self.close_to_tray.get() and self.tray and self.tray.visible:
-            self.minimize()
-        else:
-            self.close()
+        self.minimize() if self.close_to_tray.isChecked() and self.tray and self.tray.isVisible() else self.close()
+
+    def open_help(self):
+        path = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1])/"README.md"
+        if path.exists():
+            os.startfile(path)
 
     def uninstall(self):
         uninstaller = installed_uninstaller()
         if uninstaller:
             subprocess.Popen([str(uninstaller)], creationflags=subprocess.CREATE_NO_WINDOW)
             self.close()
-        elif messagebox.askyesno("清理本机数据", "关闭开机自启，清除本机设置、手机授权、日志及专用播放窗口的登录记录，然后退出。程序文件可在退出后删除。是否继续？", parent=self.window):
+        elif QMessageBox.question(self.window, "清理本机数据", "关闭开机自启，清除本机设置、手机授权、日志及专用播放窗口的登录记录，然后退出。程序文件可在退出后删除。是否继续？") == QMessageBox.StandardButton.Yes:
             try:
                 set_startup(False)
                 self.cleanup_on_exit = True
                 self.close()
             except OSError as exc:
-                self.options_status.set(f"清理启动项失败：{exc}")
-
-    def toggle_service(self):
-        self.stop() if self.thread and self.thread.is_alive() else self.start()
-
-    def stop(self):
-        self.request_stop = True
-        if self.loop and self.stop_event:
-            self.loop.call_soon_threadsafe(self.stop_event.set)
-        self.status.set("正在停止服务…")
-
-    def revoke(self):
-        if self.loop and self.relay:
-            asyncio.run_coroutine_threadsafe(self.relay.revoke_all(), self.loop)
-            self.status.set("手机授权已取消，下次需重新输入配对码")
-
-    def open_help(self):
-        path = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
-                else Path(__file__).resolve().parents[1]) / "README.md"
-        if path.exists():
-            os.startfile(path)
-
-    def poll(self):
-        self.refresh_pin_label()
-        deadline, handled, operations = time.monotonic() + .008, 0, []
-        while handled < 32 and time.monotonic() < deadline and not self.events.empty():
-            kind, payload = self.events.get_nowait()
-            handled += 1
-            if kind in {"status", "error"}:
-                self.status.set(payload)
-            elif kind == "addresses":
-                self.addresses.set(payload)
-            elif kind == "operation":
-                operations.append(payload)
-            elif kind == "inventory":
-                self.display_inventory(payload)
-            elif kind == "inventory_done":
-                self.inventory_status.set(f"检测到 {payload} 个目标，本页可见时每 15 秒更新" if payload else "请打开哔哩哔哩播放窗口或客户端")
-            elif kind == "inventory_error":
-                self.inventory_status.set(payload)
-            elif kind == "update_result":
-                self.show_update_result(payload)
-            elif kind == "update_error":
-                self.update_busy = False
-                self.update_button.state(["!disabled"])
-                self.update_status.set("检查更新失败："+payload)
-            elif kind == "show":
-                self.show()
-            elif kind == "quit":
-                self.close()
-            elif kind == "stopped":
-                self.toggle.config(text="启动服务")
-                if not self.status.get().startswith("服务启动失败"):
-                    self.status.set("服务已停止")
-        if operations:
-            self.display_operations(operations)
-        if self.closing and (not self.thread or not self.thread.is_alive()):
-            if self.overlay:
-                self.overlay.close()
-            if self.tray:
-                self.tray.close()
-            self.window.destroy()
-            return
-        self.window.after(16 if not self.events.empty() else 50, self.poll)
-
-    def display_inventory(self, rows):
-        # Keep stable row identities, selection and scroll position. Update only
-        # changed values instead of deleting and repainting the complete table.
-        current = {}
-        for index, row in enumerate(rows):
-            key = (row["kind"], row.get("path", ""), row["name"])
-            values = (row.get("installed_name", row["name"]), row["version"],
-                      "运行中" if row["running"] else "已安装", row["capabilities"])
-            existing = self.inventory_rows.get(key)
-            if existing is None:
-                item = self.inventory.insert("", index, text=values[0], values=values[1:])
-            else:
-                item, previous = existing
-                if values != previous:
-                    self.inventory.item(item, text=values[0], values=values[1:])
-                if self.inventory.index(item) != index:
-                    self.inventory.move(item, "", index)
-            current[key] = item, values
-        for key, (item, _) in self.inventory_rows.items():
-            if key not in current:
-                self.inventory.delete(item)
-        self.inventory_rows = current
-        if rows:
-            self.inventory_empty.place_forget()
-        else:
-            self.inventory_empty.configure(text="暂未发现播放器\n打开哔哩哔哩播放窗口或客户端后，再次检测。")
-            self.inventory_empty.place(relx=.5, rely=.5, anchor="center")
-
-    def display_operations(self, operations):
-        text = operations[-1]["text"]
-        if self.last_operation.get() != text:
-            self.last_operation.set(text)
-        newest = list(reversed(operations))
-        timestamp = time.strftime("%H:%M:%S")
-        lines = [timestamp + "  " + ("" if event["ok"] else "失败 · ") + event["text"] for event in newest]
-        self.records.insert(0, *lines)
-        for index, event in enumerate(newest):
-            if not event["ok"]:
-                self.records.itemconfigure(index, foreground="#C23B45")
-        if self.records.size() > 100:
-            self.records.delete(100, "end")
-        if self.records_empty.winfo_manager():
-            self.records_empty.place_forget()
-        # Keep every log entry, but paint the latest meaningful overlay once.
-        # An error or discrete action takes precedence over coalesced scrubbing.
-        feedback = next((event for event in newest if not event["ok"] or event.get("cmd") not in {"volume", "seek_to"}), newest[0])
-        now = time.monotonic()
-        if not self.hidden and self.show_feedback.get() and (feedback.get("cmd") not in {"volume", "seek_to"} or now - self.last_overlay_time > .15):
-            self.show_overlay(feedback["text"], feedback["ok"])
-            self.last_overlay_time = now
+                self.options_status.setText(f"清理启动项失败：{exc}")
 
     def close(self):
         self.end_feedback_preview()
-        if self.feedback_save_timer:
+        if self.feedback_save_timer.isActive():
             self.flush_feedback_style()
         self.closing = True
         self.stop()
 
+    def dispose(self):
+        self.closing = True
+        self.poll_timer.stop()
+        self.feedback_save_timer.stop()
+        self.end_feedback_preview()
+        if self.overlay:
+            self.overlay.close()
+            self.overlay.deleteLater()
+            self.overlay = None
+        if self.tray:
+            self.tray.hide()
+        self.window.close()
+
     def run(self):
-        self.window.mainloop()
+        self.app.exec()
         if getattr(self, "cleanup_on_exit", False):
             import shutil
             logging.shutdown()
             directory = self.preferences.path.parent.resolve()
-            profile = (directory / "browser-profile").resolve()
+            profile = (directory/"browser-profile").resolve()
             if profile.parent == directory and profile.is_dir():
                 shutil.rmtree(profile)
             for name in ("trust.json", "trust.tmp", "settings.json", "settings.tmp", "remote.log", "remote.log.1", "remote.log.2"):
-                (directory / name).unlink(missing_ok=True)
+                (directory/name).unlink(missing_ok=True)
             with contextlib.suppress(OSError):
                 directory.rmdir()
 
 
 def main():
-    enable_dpi_awareness()
     if "--quit" in sys.argv:
         signal_existing(quit=True)
         return
@@ -851,9 +738,11 @@ def main():
         return
     directory = data_directory()
     directory.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(level=logging.WARNING, handlers=[RotatingFileHandler(directory / "remote.log", maxBytes=256 * 1024, backupCount=2, encoding="utf-8")], format="%(asctime)s %(message)s")
+    logging.basicConfig(level=logging.WARNING, handlers=[RotatingFileHandler(directory/"remote.log", maxBytes=256*1024, backupCount=2, encoding="utf-8")], format="%(asctime)s %(message)s")
+    sys.excepthook = lambda kind, value, traceback: logging.error("界面回调失败", exc_info=(kind, value, traceback))
     try:
-        Companion(background="--background" in sys.argv, port=int(os.environ.get("BILI_REMOTE_PORT", "8765")), discovery_port=int(os.environ.get("BILI_REMOTE_DISCOVERY_PORT", "8766"))).run()
+        Companion(background="--background" in sys.argv, port=int(os.environ.get("BILI_REMOTE_PORT", "8765")),
+                  discovery_port=int(os.environ.get("BILI_REMOTE_DISCOVERY_PORT", "8766"))).run()
     finally:
         logging.shutdown()
         guard.close()

@@ -36,6 +36,9 @@ def main():
     args = parser.parse_args()
     sys.path.insert(0, str(args.source_root.resolve()))
     from desktop.gui import Companion
+    if hasattr(Companion, "dispose"):
+        from qt_measurements import run
+        return run(args, scrolling=True)
 
     class Preview(Companion):
         def start(self):

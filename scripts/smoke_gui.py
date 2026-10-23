@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ["BILI_REMOTE_BIND_HOST"] = "127.0.0.1"
 from desktop.gui import Companion
+from PySide6.QtCore import QTimer
 from websockets.asyncio.client import connect
 
 
@@ -43,15 +44,15 @@ def main():
         thread.start()
         def finish():
             if not thread.is_alive():
-                if results and isinstance(results[0], str) and app.records.size() == 0:
+                if results and isinstance(results[0], str) and app.records.count() == 0:
                     # The GUI consumes feedback on its next poll, after the WS reply.
-                    app.window.after(50, finish)
+                    QTimer.singleShot(50, finish)
                 else:
                     app.close()
             else:
-                app.window.after(50, finish)
-        app.window.after(100, finish)
-        app.window.after(10000, app.close)
+                QTimer.singleShot(50, finish)
+        QTimer.singleShot(100, finish)
+        QTimer.singleShot(10000, app.close)
         app.run()
         assert results and isinstance(results[0], str), results
         print(results[0])

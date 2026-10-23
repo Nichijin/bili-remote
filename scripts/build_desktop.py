@@ -18,7 +18,11 @@ def main():
         "--add-data", str(ROOT / "desktop/assets/bili-remote.ico") + ";desktop/assets",
         "--add-data", str(ROOT / "desktop/assets/player.js") + ";desktop/assets",
         "--hidden-import", "winrt.windows.foundation.collections", "--hidden-import", "winrt.windows.media",
-        "--hidden-import", "winrt.windows.foundation", "--exclude-module", "comtypes.test", "--optimize", "2",
+        "--hidden-import", "winrt.windows.foundation", "--exclude-module", "comtypes.test",
+        "--exclude-module", "tkinter", "--exclude-module", "PySide6.QtTest",
+        "--exclude-module", "PySide6.QtQml", "--exclude-module", "PySide6.QtQuick",
+        "--exclude-module", "PySide6.QtWebEngineCore", "--exclude-module", "PySide6.QtOpenGL",
+        "--exclude-module", "PySide6.QtNetwork", "--optimize", "2",
         str(ROOT / "run_desktop.py"),
     ], cwd=ROOT, check=True)
     bundle = ROOT / ".tooling/desktop-bundle/BiliRemote-Desktop"

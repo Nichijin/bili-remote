@@ -73,11 +73,13 @@ def main():
                     handles.append(child)
                     return True
                 user.EnumChildWindows(handle, collect, 0)
-                assert len(handles) >= 50, "Window appeared before its real controls were constructed"
+                # Qt raster children deliberately have no HWND. Native child count
+                # is architecture evidence, never proof that controls painted.
+                assert len(handles) == 0 or len(handles) >= 50, "Unexpected native child hierarchy"
                 result = ctypes.c_size_t()
                 assert user.SendMessageTimeoutW(handle, 0, 0, 0, 2, 2000, ctypes.byref(result)), "Visible main window is unresponsive"
                 ready_ms = (time.perf_counter()-started)*1000
-                user.SetWindowPos(handle, wintypes.HWND(-1), 0, 0, 0, 0, 0x43)
+                user.SetWindowPos(handle, wintypes.HWND(-1), 0, 0, 0, 0, 0x13)
                 box = wintypes.RECT()
                 user.GetWindowRect(handle, ctypes.byref(box))
                 capture = (box.left+max(1, (box.right-box.left)//3), box.top+65, box.right-30, box.bottom-30)

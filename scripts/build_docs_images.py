@@ -144,58 +144,9 @@ def capture_mobile():
 
 
 def capture_window(window, path):
-    """Capture only this window's client pixels; never capture the user's screen."""
-    window.update_idletasks()
-    window.update()
-    # Drain normal widget drawing; page switching has no animation.
-    deadline = time.monotonic() + .25
-    while time.monotonic() < deadline:
-        window.update()
-        time.sleep(.005)
-    user, gdi = ctypes.windll.user32, ctypes.windll.gdi32
-    user.GetParent.argtypes, user.GetParent.restype = [wintypes.HWND], wintypes.HWND
-    handle = user.GetParent(window.winfo_id()) or window.winfo_id()
-    rect = wintypes.RECT()
-    user.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-    user.GetClientRect(handle, ctypes.byref(rect))
-    width, height = rect.right, rect.bottom
-    user.GetDC.argtypes, user.GetDC.restype = [wintypes.HWND], wintypes.HDC
-    user.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
-    gdi.CreateCompatibleDC.argtypes, gdi.CreateCompatibleDC.restype = [wintypes.HDC], wintypes.HDC
-    gdi.CreateCompatibleBitmap.argtypes, gdi.CreateCompatibleBitmap.restype = [wintypes.HDC, ctypes.c_int, ctypes.c_int], wintypes.HBITMAP
-    gdi.SelectObject.argtypes, gdi.SelectObject.restype = [wintypes.HDC, wintypes.HANDLE], wintypes.HANDLE
-    gdi.DeleteObject.argtypes = [wintypes.HANDLE]
-    gdi.DeleteDC.argtypes = [wintypes.HDC]
-    user.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
-    source = user.GetDC(handle)
-    target = gdi.CreateCompatibleDC(source)
-    bitmap = gdi.CreateCompatibleBitmap(source, width, height)
-    previous = gdi.SelectObject(target, bitmap)
-
-    class BitmapHeader(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("width", wintypes.LONG), ("height", wintypes.LONG),
-                    ("planes", wintypes.WORD), ("bits", wintypes.WORD), ("compression", wintypes.DWORD),
-                    ("image_size", wintypes.DWORD), ("x", wintypes.LONG), ("y", wintypes.LONG),
-                    ("colors", wintypes.DWORD), ("important", wintypes.DWORD)]
-
-    try:
-        if not user.PrintWindow(handle, target, 3):
-            raise RuntimeError("无法捕获文档预览窗口")
-        gdi.SelectObject(target, previous)
-        header = BitmapHeader(ctypes.sizeof(BitmapHeader), width, -height, 1, 32, 0, width * height * 4, 0, 0, 0, 0)
-        pixels = ctypes.create_string_buffer(width * height * 4)
-        gdi.GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
-        if not gdi.GetDIBits(target, bitmap, 0, height, pixels, ctypes.byref(header), 0):
-            raise RuntimeError("无法读取窗口像素")
-        image = Image.frombytes("RGB", (width, height), pixels.raw, "raw", "BGRX")
-        if max(ImageStat.Stat(image).stddev) < 3:
-            raise RuntimeError("窗口截图为空白")
-        image.save(path)
-    finally:
-        gdi.SelectObject(target, previous)
-        gdi.DeleteObject(bitmap)
-        gdi.DeleteDC(target)
-        user.ReleaseDC(handle, source)
+    from PySide6.QtTest import QTest
+    QTest.qWait(80)
+    window.grab().save(str(path))
 
 
 def capture_desktop():
@@ -206,42 +157,30 @@ def capture_desktop():
 
         class Preview(Companion):
             def start(self):
-                # Render the real widgets without network, real device discovery or data.
-                self.toggle.config(text="停止服务")
-                self.status.set("电脑已在线 · 等待手机连接")
-                self.addresses.set("演示电脑 · 192.168.1.10")
-
+                self.toggle.setText("停止服务")
+                self.set_status("电脑已在线 · 等待手机连接")
+                self.addresses.setText("演示电脑 · 192.168.1.10")
             def refresh_pin_label(self):
-                self.pin_text.set("123 456")
-
+                self.pin_text.setText("123 456")
         from unittest.mock import patch
         with patch("desktop.gui.startup_enabled", return_value=False):
             app = Preview(hidden=True)
         try:
-            app.window.title("哔哩哔哩手势遥控 · 文档界面预览")
-            app.window.geometry(f"{app.px(1040)}x{app.px(820)}+30+30")
-            app.window.deiconify()
+            app.window.setWindowTitle("哔哩哔哩手势遥控 · 文档界面预览")
+            app.window.resize(1040, 820)
+            app.window.show()
             capture_window(app.window, RAW / "desktop-main.png")
-            tabs = app.tabs
-            tabs.select(1)
-            capture_window(app.window, RAW / "desktop-players.png")
-            tabs.select(2)
-            capture_window(app.window, RAW / "desktop-records.png")
-            tabs.select(3)
-            capture_window(app.window, RAW / "desktop-settings.png")
-            app.window.geometry(f"{app.px(1040)}x{app.px(880)}+30+30")
-            app.window.update()
-            page = app.options_page
-            offset = app.feedback_frame.winfo_rooty() - page.content.winfo_rooty()
-            page.canvas.yview_moveto(offset / max(1, page.content.winfo_height()))
-            app.window.update()
+            for index, name in ((1, "players"), (2, "records"), (3, "settings")):
+                app.select_page(index)
+                capture_window(app.window, RAW / f"desktop-{name}.png")
+            scroll = app.tabs.widget(3)
+            scroll.ensureWidgetVisible(app.subtitle_preview)
             capture_window(app.window, RAW / "desktop-feedback.png")
-            app.window.minsize(1, 1)
-            app.window.geometry("560x650+30+30")
-            tabs.select(0)
+            app.window.resize(560, 650)
+            app.select_page(0)
             capture_window(app.window, RAW / "desktop-compact.png")
         finally:
-            app.window.destroy()
+            app.dispose()
 
 
 def build_styles():

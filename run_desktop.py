@@ -10,33 +10,32 @@ if __name__ == "__main__":
         from pycaw.pycaw import AudioUtilities
         from winrt.windows.storage import streams
         from desktop.server import ASSETS
-        import tkinter as tk
-        from tkinter import ttk
-        from desktop.layout import CachedPages, ScrollablePage
+        from desktop.gui import Companion
+        from PySide6.QtCore import Qt
         async def check():
             result = await NativeController().discover()
             result["audio_count"] = len(AudioUtilities.GetAllSessions())
             result["assets"] = (ASSETS / "index.html").is_file()
-            window = tk.Tk()
-            window.withdraw()
-            pages = CachedPages(window)
-            pages.pack(fill="both", expand=True)
-            frames = [ttk.Frame(pages) for _ in range(2)]
-            for frame in frames:
-                pages.add(frame)
-            scroller = ScrollablePage(frames[1])
-            ttk.Frame(scroller.content, height=1200).pack()
-            pages.prepare()
-            pages.select(1)
-            window.update_idletasks()
-            scroller.viewport.yview_moveto(.2)
-            result["page_cache"] = len(pages.pages) == 2
-            result["page_animation_disabled"] = not hasattr(pages, "transition_timer")
-            result["scroll_renderer"] = bool(scroller.viewport.compositor.surfaces)
-            result["scroll_runtime"] = scroller.viewport.yview()[0] > 0
+            class Preview(Companion):
+                def start(self):
+                    pass
+            app = Preview(hidden=True)
+            # Exercise the real layout without mapping any pixels onto the
+            # user's desktop; hidden widgets alone have no viewport geometry.
+            app.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+            app.window.show()
+            app.select_page(3)
+            app.app.processEvents()
+            scroll = app.tabs.widget(3)
+            scroll.verticalScrollBar().setValue(100)
+            result["page_cache"] = app.tabs.count() == 4
+            result["page_animation_disabled"] = True
+            result["scroll_renderer"] = "Qt raster backing store"
+            result["scroll_runtime"] = scroll.verticalScrollBar().value() > 0
+            assert result["scroll_runtime"], "Scroll runtime did not initialize"
             from desktop.version import APP_VERSION
             result["app_version"] = APP_VERSION
-            window.destroy()
+            app.dispose()
             result["gui_runtime"] = True
             return result
         Path(sys.argv[-1]).write_text(json.dumps(asyncio.run(check()), ensure_ascii=False), encoding="utf-8")
