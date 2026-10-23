@@ -8,6 +8,7 @@ config.device_name ||= window.Android ? Android.deviceName() : "手机浏览器"
 config.ui_style ||= "touchpad";
 if (!config.schema) { if (config.target === "browser") config.target = "auto"; config.schema = 2; }
 config.target ||= "auto";
+config.browser_choice = ["auto", "edge", "chrome"].includes(config.browser_choice) ? config.browser_choice : "auto";
 config.gears = normalizeGears(config.gears);
 config.rate = config.gears.includes(Number(config.rate)) ? Number(config.rate) : config.gears.includes(2) ? 2 : config.gears[0];
 config.haptics = config.haptics !== false;
@@ -41,6 +42,10 @@ function previewSeek({ position, start, end }) {
 }
 const connection = new RemoteConnection({ config, persist, state: connectionState, discovery: renderComputers });
 const send = (cmd, fields = {}) => connection.send(cmd, fields).then(result => {
+  if (result.control_target?.name) {
+    byId("activeTarget").textContent = `最近确认目标：${result.control_target.name}`;
+    byId("controlStatus").textContent = "";
+  }
   if (typeof result.volume === "number") byId("volumeText").textContent = `音量 ${Math.round(result.volume * 100)}%`;
   if (typeof result.paused === "boolean") byId("playSymbol").innerHTML = result.paused ? '<path d="M12 7 32 20 12 33Z"/>' : '<path d="M11 8h6v24h-6zM23 8h6v24h-6z"/>';
   return result;
@@ -81,6 +86,7 @@ function connectionState(state) {
     if (settings.open) settings.close();
     if (!pairing.open) { byId("pairingCode").value = ""; pairing.showModal(); }
   } else if (state.phase === "disconnected" || state.phase === "error") {
+    byId("activeTarget").textContent = "电脑未连接；播放目标尚未确认。";
     cancelControls();
     hint(state.phase === "error" ? state.text : "等待电脑上线 · 双指触摸可查看连接");
   }
@@ -145,6 +151,8 @@ document.querySelectorAll("[data-style]").forEach(button => button.onclick = () 
 byId("target").value = config.target;
 byId("target").onchange = () => { cancelControls(); config.target = byId("target").value; byId("nativeSettings").hidden = config.target !== "native"; persist(); };
 byId("nativeSettings").hidden = config.target !== "native";
+byId("browserChoice").value = config.browser_choice;
+byId("browserChoice").onchange = () => { config.browser_choice = byId("browserChoice").value; persist(); };
 byId("rate").onchange = () => { cancelControls(); config.rate = Number(byId("rate").value); holdChanged(null); persist(); };
 function renderGears() {
   byId("gearCount").value = config.gears.length;
@@ -197,7 +205,7 @@ renderHaptics();
 byId("host").value = config.host || (location.protocol !== "file:" ? location.host : "");
 if (config.session_id) byId("session").add(new Option(config.session_id, config.session_id));
 byId("session").value = config.session_id || "";
-byId("session").onchange = () => { config.session_id = byId("session").value; persist(); };
+byId("session").onchange = () => { cancelControls(); config.session_id = byId("session").value; persist(); };
 byId("computer").onchange = () => {
   const item = connection.computers.find(item => item.computer_id === byId("computer").value);
   if (item) { cancelControls(); connection.connect(item.host, item.computer_id); }
@@ -216,12 +224,15 @@ byId("cancelPairing").onclick = () => { pairing.close(); window.openSettings(); 
 byId("discover").onclick = async () => {
   try {
     const result = await send("discover");
-    byId("session").replaceChildren(new Option("自动识别哔哩哔哩", ""));
+    const selected = config.session_id || "";
+    byId("session").replaceChildren(new Option("自动识别哔哩哔哩客户端", ""));
     for (const item of result.sessions || []) {
       const features = [["toggle", "暂停"], ["seek", "进度"], ["speed", "倍速"]].filter(([key]) => item[key]).map(([, label]) => label).join(" / ") || "未开放接口";
-      byId("session").add(new Option(`${item.id}（${features}）`, item.id));
+      byId("session").add(new Option(`${item.name || item.id}（${features}）`, item.id));
     }
-    byId("connectionStatus").textContent = result.sessions?.length ? "请选择要控制的客户端" : "请先在客户端播放视频";
+    if (selected && !(result.sessions || []).some(item => item.id === selected)) byId("session").add(new Option(`${selected}（当前未提供会话）`, selected));
+    byId("session").value = selected;
+    byId("controlStatus").textContent = result.sessions?.length ? "请选择要控制的浏览器或客户端；列表显示实际开放的能力。" : "请先在浏览器或客户端播放视频，再检测。";
   } catch (failure) { byId("connectionStatus").textContent = failure.message; }
 };
 document.querySelectorAll("[data-command]").forEach(button => button.onclick = async () => {
@@ -237,8 +248,13 @@ byId("launchBrowser").onclick = async () => {
   button.disabled = true;
   message.textContent = "正在电脑打开哔哩哔哩…";
   try {
-    await send("open_browser");
-    message.textContent = "已在电脑打开网页播放窗口，请选择视频。";
+    cancelControls();
+    const result = await send("open_browser", {browser: config.browser_choice});
+    config.target = "browser";
+    byId("target").value = config.target;
+    byId("nativeSettings").hidden = true;
+    persist();
+    message.textContent = `已打开 ${result.control_target?.name || "专用网页窗口"}，并切换到专用网页控制；请在该窗口选择视频。`;
     hint(message.textContent);
   } catch (failure) {
     message.textContent = failure.message || String(failure);

@@ -12,9 +12,10 @@ from desktop.browser import BrowserController, find_browser
 
 
 @pytest.mark.asyncio
-async def test_direct_browser_playback_without_extensions(tmp_path):
+@pytest.mark.parametrize("preferred", ["edge", "chrome"])
+async def test_direct_browser_playback_without_extensions(tmp_path, preferred):
     try:
-        executable = find_browser()
+        executable = find_browser(preferred)
     except RuntimeError:
         pytest.skip("Edge/Chrome not installed")
     output = io.BytesIO()
@@ -39,6 +40,12 @@ async def test_direct_browser_playback_without_extensions(tmp_path):
     browser = BrowserController(profile=tmp_path / "profile", executable=executable, launch_url=f"http://127.0.0.1:{server.server_port}", allowed_hosts={"127.0.0.1"}, headless=True)
     try:
         await browser.open()
+        # The browser endpoint becomes ready before the fixture's HTML/video.
+        for attempt in range(40):
+            pages = await browser._pages()
+            if pages:
+                break
+            await asyncio.sleep(.05)
         page = await browser._page()
         for _ in range(40):
             ready = await browser._evaluate(page, "document.querySelector('video')?.readyState >= 2")

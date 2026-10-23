@@ -29,6 +29,17 @@ def test_valid_gear_change_is_normalized():
     assert validate({"cmd": "speed_change", "rate": 3})["rate"] == 3.0
 
 
+@pytest.mark.parametrize("browser", ["auto", "edge", "chrome"])
+def test_explicit_browser_choice_is_preserved(browser):
+    assert validate({"cmd": "open_browser", "browser": browser})["browser"] == browser
+
+
+@pytest.mark.parametrize("browser", ["firefox", "arbitrary.exe", {}, None])
+def test_browser_choice_rejects_arbitrary_paths_and_invalid_types(browser):
+    with pytest.raises(ValueError):
+        validate({"cmd": "open_browser", "browser": browser})
+
+
 @pytest.mark.parametrize("rate", [.5, .75, 1, 1.25, 1.5, 2, 2.25, 2.5, 2.75, 3])
 def test_custom_gears_and_fractional_seeks_are_supported(rate):
     assert validate({"cmd": "speed_start", "rate": rate})["rate"] == rate

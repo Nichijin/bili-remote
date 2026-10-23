@@ -52,7 +52,7 @@ class ServiceRuntime:
             self.detection_request.set()
         if self.closing or self.request_stop:
             self.stop_event.set()
-        self.relay = Relay(trust=TrustStore(self.trust_path), pairing=self.pairing, notify=lambda text: self.events.put(("status", text)), feedback=lambda event: self.events.put(("operation", event)))
+        self.relay = Relay(trust=TrustStore(self.trust_path), pairing=self.pairing, notify=lambda text: self.events.put(("status", text)), feedback=lambda event: self.events.put(("operation", event)), target_notify=lambda target: self.events.put(("control_target", target)))
         discovery = None
         watchdog = asyncio.create_task(self.relay.watchdog())
         monitor = asyncio.create_task(self.monitor_targets())
@@ -88,7 +88,7 @@ class ServiceRuntime:
                 # Loading the WinRT media DLLs for a browser-only table used
                 # to cause a Python-wide import pause and retain unused DLLs.
                 native = self.relay.native
-                if installed or any(row["kind"] == "client" for row in running) or native.manager is not None:
+                if installed or running or native.manager is not None:
                     try:
                         sessions = (await asyncio.wait_for(native.discover(), 3))["sessions"]
                     except Exception:

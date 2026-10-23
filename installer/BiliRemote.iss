@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.5.9"
+  #define AppVersion "0.5.10"
 #endif
 #define AppExe "BiliRemote-Desktop.exe"
 #ifndef AppSourcePath
@@ -84,6 +84,7 @@ Type: files; Name: "{#UserDataPath}\remote.log"
 Type: files; Name: "{#UserDataPath}\remote.log.1"
 Type: files; Name: "{#UserDataPath}\remote.log.2"
 Type: filesandordirs; Name: "{#UserDataPath}\browser-profile"
+Type: filesandordirs; Name: "{#UserDataPath}\browser-profile-chrome"
 Type: dirifempty; Name: "{#UserDataPath}"
 
 [Code]

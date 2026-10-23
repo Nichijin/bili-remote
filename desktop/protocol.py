@@ -15,6 +15,11 @@ def validate(message):
     if target not in {"auto", "browser", "native"}:
         raise ValueError("未知播放目标")
     result = {"cmd": command, "target": target}
+    if command == "open_browser":
+        browser = message.get("browser", "auto")
+        if not isinstance(browser, str) or browser not in {"auto", "edge", "chrome"}:
+            raise ValueError("未知浏览器选择")
+        result["browser"] = browser
     session_id = message.get("session_id", "")
     if not isinstance(session_id, str) or len(session_id) > 512:
         raise ValueError("客户端标识不正确")

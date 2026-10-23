@@ -4,6 +4,7 @@ import hashlib
 import time
 from datetime import timedelta
 from .detection import is_client
+from .targets import browser_name, browser_windows, target_info
 
 
 class NativeController:
@@ -22,15 +23,37 @@ class NativeController:
             self.manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
         return self.manager
 
-    async def discover(self):
+    async def discover(self, context=None):
         manager = await self._manager()
+        context = context if context is not None else await asyncio.to_thread(browser_windows)
         sessions = []
         for session in manager.get_sessions():
+            source = session.source_app_user_model_id
             info = session.get_playback_info()
             controls = info.controls
+            evidence = is_client(source)
+            in_foreground = False
+            matching_pids = []
+            if browser_name(source):
+                try:
+                    properties = await asyncio.wait_for(session.try_get_media_properties_async(), .7)
+                    title = str(getattr(properties, "title", "") or "").strip()
+                    matching_pids = list({window["pid"] for window in context["windows"] if title and
+                        browser_name(window["source"]) == browser_name(source) and window["bilibili"]
+                        and title.casefold() in window["title"].casefold()})
+                    evidence = bool(matching_pids)
+                    front = context.get("foreground")
+                    in_foreground = bool(title and front and front["bilibili"] and browser_name(front["source"]) == browser_name(source) and title.casefold() in front["title"].casefold())
+                except Exception:
+                    evidence = False
             sessions.append({
-                "id": session.source_app_user_model_id,
-                "toggle": bool(controls.is_play_pause_toggle_enabled or controls.is_pause_enabled or controls.is_play_enabled),
+                "id": source,
+                "name": target_info(source, "system")["name"],
+                "bilibili": evidence,
+                "foreground": in_foreground,
+                "matching_window_pids": matching_pids,
+                "playing": getattr(getattr(info, "playback_status", None), "name", "") == "PLAYING",
+                "toggle": bool(controls.is_play_pause_toggle_enabled or getattr(controls, "is_pause_enabled", False) or getattr(controls, "is_play_enabled", False)),
                 "seek": bool(controls.is_playback_position_enabled),
                 "speed": bool(controls.is_playback_rate_enabled),
             })
@@ -39,10 +62,12 @@ class NativeController:
     async def _session(self, session_id):
         sessions = list((await self._manager()).get_sessions())
         if session_id:
-            match = next((s for s in sessions if s.source_app_user_model_id == session_id), None)
-            if match is None:
-                raise RuntimeError("所选客户端未提供媒体会话；请先播放视频并重新检测")
-            return match
+            matches = [s for s in sessions if s.source_app_user_model_id == session_id]
+            if not matches:
+                raise RuntimeError("所选播放器未提供媒体会话；请先播放视频并重新检测")
+            if len(matches) > 1:
+                raise RuntimeError("同一浏览器提供了多个媒体会话；请关闭多余播放标签页，或使用专用网页窗口")
+            return matches[0]
         matches = [s for s in sessions if is_client(s.source_app_user_model_id)]
         if len(matches) == 1:
             return matches[0]
@@ -129,20 +154,25 @@ class NativeController:
                 return await self.discover()
             if command in {"speed_keep", "speed_end", "speed_change"}:
                 if self.boost and self.boost["owner"] == owner:
+                    target = target_info(self.boost["session"].source_app_user_model_id, "system")
                     if command == "speed_change":
                         await self._checked(self.boost["session"].try_change_playback_rate_async(message["rate"]), "倍速切换")
                         self.boost["deadline"] = time.monotonic() + 1.8
-                        return {"rate": message["rate"]}
+                        return {"rate": message["rate"], "control_target": target}
                     elif command == "speed_keep":
                         self.boost["deadline"] = time.monotonic() + 1.8
                     else:
                         await self._restore()
+                    return {"control_target": target}
                 elif command == "speed_change":
                     raise RuntimeError("临时倍速已结束，请重新长按")
                 return {}
             session = await self._session(message["session_id"])
             info = session.get_playback_info()
             controls = info.controls
+            target = target_info(session.source_app_user_model_id, "system", toggle=bool(controls.is_play_pause_toggle_enabled or getattr(controls, "is_pause_enabled", False) or getattr(controls, "is_play_enabled", False)),
+                                 seek=bool(controls.is_playback_position_enabled), speed=bool(controls.is_playback_rate_enabled),
+                                 volume=not bool(browser_name(session.source_app_user_model_id)))
             if command == "toggle":
                 if controls.is_play_pause_toggle_enabled:
                     await self._checked(session.try_toggle_play_pause_async(), "播放/暂停")
@@ -157,7 +187,7 @@ class NativeController:
                 start, end = timeline.min_seek_time.total_seconds(), timeline.max_seek_time.total_seconds()
                 key = await self._timeline_key(session, start, end) if command in {"seek_to", "status"} else ""
                 if command == "status":
-                    return {"time": timeline.position.total_seconds(), "duration": end, "seek_start": start, "seek_end": end if controls.is_playback_position_enabled else None, "media_key": key}
+                    return {"time": timeline.position.total_seconds(), "duration": end, "seek_start": start, "seek_end": end if controls.is_playback_position_enabled else None, "media_key": key, "control_target": target}
                 if not controls.is_playback_position_enabled:
                     raise RuntimeError("该客户端未开放进度控制接口")
                 if command == "seek_to" and message["media_key"] != key:
@@ -166,12 +196,14 @@ class NativeController:
                 position = max(timeline.min_seek_time, min(timeline.max_seek_time, position))
                 # GSMTC expects 100-nanosecond ticks, not seconds or a TimeSpan.
                 await self._checked(session.try_change_playback_position_async(int(position.total_seconds() * 10_000_000)), "进度调整")
-                return {"time": position.total_seconds()}
+                return {"time": position.total_seconds(), "control_target": target}
             elif command == "volume":
-                return await self._volume(session.source_app_user_model_id, message["delta"])
+                if browser_name(session.source_app_user_model_id):
+                    raise RuntimeError("普通浏览器系统媒体接口不提供单个视频音量；请使用专用网页窗口，避免改变其他标签页的音量")
+                return {**await self._volume(session.source_app_user_model_id, message["delta"]), "control_target": target}
             elif command == "speed_start":
                 if not controls.is_playback_rate_enabled:
-                    raise RuntimeError("该客户端未开放倍速接口，需要为该版本另写适配器")
+                    raise RuntimeError("当前播放器未开放倍速接口；请在手机设置中选择 Edge / Chrome 并点击“在电脑打开哔哩哔哩”使用完整控制")
                 await self._restore()
                 info = session.get_playback_info()
                 original = info.playback_rate
@@ -179,4 +211,4 @@ class NativeController:
                     raise RuntimeError("客户端未报告原始速度，无法安全恢复临时倍速")
                 await self._checked(session.try_change_playback_rate_async(message["rate"]), "临时倍速")
                 self.boost = {"session": session, "rate": original, "owner": owner, "deadline": time.monotonic() + 1.8}
-            return {}
+            return {"control_target": target}

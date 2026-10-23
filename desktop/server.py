@@ -13,13 +13,14 @@ from urllib.parse import urlsplit
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
-from .browser import BrowserController
+from .browser import BrowserManager
 from .detection import is_client
 from .native import NativeController
 from .pairing import PairingCode
 from .protocol import validate
 from .trust import TrustStore
 from .discovery import start_discovery
+from .targets import NativeRoute, browser_name, browser_windows
 
 LOG = logging.getLogger("remote")
 ASSETS = Path(__file__).resolve().parents[1] / "android/app/src/main/assets"
@@ -46,13 +47,14 @@ def operation_text(command, result):
 
 
 class Relay:
-    def __init__(self, native=None, trust=None, pairing=None, browser=None, notify=None, feedback=None):
+    def __init__(self, native=None, trust=None, pairing=None, browser=None, notify=None, feedback=None, target_notify=None):
         self.native = native or NativeController()
-        self.browser = browser or BrowserController()
+        self.browser = browser or BrowserManager()
         self.trust = trust or TrustStore()
         self.pairing = pairing or PairingCode()
         self.notify = notify or (lambda text: None)
         self.feedback = feedback or (lambda event: None)
+        self.target_notify = target_notify or (lambda target: None)
         self.remote_peers = {}
         self.failed_pins = defaultdict(deque)
         self.total_failures = deque()
@@ -118,16 +120,44 @@ class Relay:
 
     async def choose_target(self, message):
         if message["target"] == "native":
-            return self.native
+            return NativeRoute(self.native, message["session_id"]) if message.get("session_id") else self.native
+        if message["target"] == "browser":
+            return await self.browser.selected() if isinstance(self.browser, BrowserManager) else self.browser
         if message["target"] == "auto":
-            if getattr(self.browser, "running", False):
-                return self.browser
+            context = await asyncio.to_thread(browser_windows)
+            foreground = context["foreground"]
+            web = await self.browser.candidates() if isinstance(self.browser, BrowserManager) else []
+            active_web = [row for row in web if row.get("visible") or row.get("playing")]
             try:
-                sessions = (await self.native.discover())["sessions"]
-                if any(is_client(s["id"]) for s in sessions):
-                    return self.native
+                discovery = await self.native.discover(context) if isinstance(self.native, NativeController) else await self.native.discover()
+                sessions = [row for row in discovery["sessions"] if row.get("bilibili", is_client(row["id"]))]
             except Exception:
-                pass
+                sessions = []
+            if foreground:
+                # A regular foreground browser must never fall through to a
+                # different, hidden profile (including the same browser brand).
+                active_web = [row for row in web if row["controller"].browser_process.pid == foreground["pid"] and row.get("visible")]
+                sessions = [row for row in sessions if browser_name(row["id"]) == browser_name(foreground["source"]) and row.get("foreground")]
+                if not active_web and not sessions:
+                    name = browser_name(foreground["source"])
+                    raise RuntimeError(f"当前前台 {name} 尚未确认可控制的哔哩哔哩视频；请在手机设置中检测并选择系统媒体会话，或主动打开专用网页窗口；本次未切换到后台窗口")
+            # A browser's system media session may describe its own managed
+            # page. Prefer that page's full interface over its limited duplicate.
+            web_pids = {row["controller"].browser_process.pid for row in active_web}
+            sessions = [row for row in sessions if not row.get("matching_window_pids") or not set(row["matching_window_pids"]).issubset(web_pids)]
+            playing = [row for row in sessions if row.get("playing")]
+            if playing:
+                sessions = playing
+            if len(active_web)+len(sessions) > 1:
+                raise RuntimeError("发现多个可控制的视频，自动选择已停止；请在手机设置中明确选择专用网页或系统媒体会话")
+            if active_web:
+                row = active_web[0]
+                row["controller"].page_hint = row["page"]["id"]
+                return row["controller"]
+            if sessions:
+                return NativeRoute(self.native, sessions[0]["id"])
+            if web:
+                raise RuntimeError("专用窗口的视频已暂停且不在当前可见页面；请切回该视频，或在手机选择“专用网页窗口”后操作")
         return self.browser
 
     async def execute(self, message, owner):
@@ -136,13 +166,17 @@ class Relay:
             if kind == "discover":
                 return await self.native.discover()
             if kind == "open_browser":
-                return await self.browser.open()
+                result = await self.browser.open(message.get("browser", "auto")) if isinstance(self.browser, BrowserManager) else await self.browser.open()
+                self.target_notify(result.get("control_target"))
+                return result
             if kind in {"speed_keep", "speed_end", "speed_change"}:
                 controller = self.held_targets.get(owner)
                 if controller:
                     result = await controller.execute(message, owner)
                     if kind == "speed_end":
                         self.held_targets.pop(owner, None)
+                    if result.get("control_target"):
+                        self.target_notify(result["control_target"])
                     return result
                 if kind == "speed_change":
                     raise RuntimeError("临时倍速已结束，请重新长按")
@@ -154,7 +188,10 @@ class Relay:
                     await previous.execute({"cmd": "speed_end"}, owner)
                 self.held_targets[owner] = controller
             try:
-                return await controller.execute(message, owner)
+                result = await controller.execute(message, owner)
+                if result.get("control_target"):
+                    self.target_notify(result["control_target"])
+                return result
             except Exception:
                 if kind == "speed_start" and not getattr(controller, "boost", None):
                     self.held_targets.pop(owner, None)
@@ -191,6 +228,8 @@ class Relay:
                     result = await self.execute(command, owner)
                     reply = {"id": message.get("id"), "ok": True, "result": result}
                     text = operation_text(command, result)
+                    if result.get("control_target"):
+                        text = result["control_target"]["name"]+" · "+text
                 except (ValueError, RuntimeError) as exc:
                     reply = {"id": message.get("id") if isinstance(message, dict) else None, "ok": False, "error": str(exc)}
                     text = str(exc)

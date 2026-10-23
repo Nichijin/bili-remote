@@ -116,6 +116,7 @@ def main():
         assert json.loads((data_dir / "trust.json").read_text(encoding="utf-8")) == trust_data
         assert (data_dir / "settings.json").read_bytes() == settings
         assert cookie.read_bytes() == b"saved browser login sentinel"
+        assert chrome_cookie.read_bytes() == b"saved chrome login sentinel"
 
     complete = False
     try:
@@ -154,6 +155,9 @@ def main():
         cookie = data_dir / "browser-profile/Default/Cookies-test"
         cookie.parent.mkdir(parents=True)
         cookie.write_bytes(b"saved browser login sentinel")
+        chrome_cookie = data_dir / "browser-profile-chrome/Default/Cookies-test"
+        chrome_cookie.parent.mkdir(parents=True)
+        chrome_cookie.write_bytes(b"saved chrome login sentinel")
         old_process = subprocess.Popen([str(exe), "--background"], env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
         wait_service(True)
         asyncio.run(authenticate(token, trust.computer_id))
@@ -206,7 +210,7 @@ def main():
         assert_data()
         report = {"old_to_new_upgrade": old_version + " -> " + new_version, "original_directory_retained": True,
                   "one_installation": True, "running_instance_restarted": True,
-                  "settings_preserved": True, "browser_profile_preserved": True,
+                  "settings_preserved": True, "browser_profile_preserved": True, "chrome_profile_preserved": True,
                   "computer_identity_preserved": True, "saved_phone_reconnected_without_pin": True,
                   "app_enabled_autostart_preserved": True, "task_manager_disabled_autostart_preserved": True,
                   "same_version_repair": True, "explicit_task_change": True, "downgrade_rejected": True}

@@ -187,3 +187,12 @@ def test_failed_update_reenables_retry(companion):
         while app.update_busy and time.monotonic() < deadline:
             QTest.qWait(5)
     assert "检查更新失败" in app.update_status.text() and app.update_button.isEnabled()
+
+
+def test_browser_choice_persists_and_actual_target_is_shown(companion):
+    app = companion
+    app.browser_choice.setCurrentIndex(app.browser_choice.findData("chrome"))
+    assert json.loads(app.preferences.path.read_text(encoding="utf-8"))["browser_choice"] == "chrome"
+    app.events.put(("control_target", {"name": "Edge · 系统媒体 · 功能取决于接口"}))
+    app.poll()
+    assert "Edge" in app.control_target.text() and "系统媒体" in app.control_target.text()

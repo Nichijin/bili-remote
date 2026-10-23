@@ -216,8 +216,18 @@ class Companion(ServiceRuntime):
         connection.addStretch()
         pairing.addStretch()
         player = self.add_card(0, "播放视频", "打开专用播放窗口，选择你想看的视频。")
+        self.browser_choice = QComboBox()
+        self.browser_choice.addItem("自动选择已安装浏览器", "auto")
+        self.browser_choice.addItem("Microsoft Edge", "edge")
+        self.browser_choice.addItem("Google Chrome", "chrome")
+        saved = self.browser_choice.findData(self.preferences.values.get("browser_choice", "auto"))
+        self.browser_choice.setCurrentIndex(max(0, saved))
+        self.browser_choice.currentIndexChanged.connect(lambda: self.save_preference("browser_choice", self.browser_choice.currentData()))
+        player.addWidget(self.browser_choice)
         self.add_action(player, "打开哔哩哔哩 · 无需扩展", self.open_browser, "primary")
-        player.addWidget(label("专用 Edge / Chrome 窗口支持完整遥控。Windows 客户端请手动打开，可用功能取决于客户端接口。", "muted"))
+        player.addWidget(label("完整倍速和视频音量请使用专用窗口。普通 Edge / Chrome 可在手机设置中检测并选择系统媒体会话，功能取决于浏览器接口。", "muted"))
+        self.control_target = label("尚未确认播放目标；首次成功操作后显示实际通道。", "muted")
+        player.addWidget(self.control_target)
         recent = self.add_card(0, "最近一次操作")
         self.last_operation = label("尚无遥控操作", "muted")
         recent.addWidget(self.last_operation)
@@ -469,10 +479,13 @@ class Companion(ServiceRuntime):
         if not self.loop or not self.relay:
             self.set_status("请先启动电脑服务")
             return
+        choice = self.browser_choice.currentData()
         async def open_window():
             try:
-                await self.relay.browser.open()
-                self.events.put(("operation", {"ok": True, "text": "已打开遥控播放窗口，请选择视频", "cmd": "open_browser"}))
+                result = await self.relay.browser.open(choice)
+                target = result.get("control_target")
+                self.events.put(("control_target", target))
+                self.events.put(("operation", {"ok": True, "text": (target["name"]+" · " if target else "")+"已打开遥控播放窗口，请选择视频", "cmd": "open_browser"}))
                 if self.inventory_visible.is_set():
                     self.detection_request.set()
             except Exception as exc:
@@ -626,6 +639,9 @@ class Companion(ServiceRuntime):
                 self.set_status(payload)
             elif kind == "addresses":
                 self.addresses.setText(payload)
+            elif kind == "control_target":
+                if payload:
+                    self.control_target.setText("最近确认目标："+payload["name"])
             elif kind == "operation":
                 operations.append(payload)
             elif kind == "inventory":
@@ -717,9 +733,10 @@ class Companion(ServiceRuntime):
             import shutil
             logging.shutdown()
             directory = self.preferences.path.parent.resolve()
-            profile = (directory/"browser-profile").resolve()
-            if profile.parent == directory and profile.is_dir():
-                shutil.rmtree(profile)
+            for name in ("browser-profile", "browser-profile-chrome"):
+                profile = (directory/name).resolve()
+                if profile.parent == directory and profile.is_dir():
+                    shutil.rmtree(profile)
             for name in ("trust.json", "trust.tmp", "settings.json", "settings.tmp", "remote.log", "remote.log.1", "remote.log.2"):
                 (directory/name).unlink(missing_ok=True)
             with contextlib.suppress(OSError):

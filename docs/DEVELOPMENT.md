@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [使用指南](USAGE.md) · [常见问题](FAQ.md)
 
-本页面向维护者。当前项目版本为 **0.5.9**，安卓 `versionCode` 为 **19**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
+本页面向维护者。当前项目版本为 **0.5.10**，安卓 `versionCode` 为 **20**。主要开发环境为 Windows、Python 3.12、JDK 17 和 Android SDK 35。
 
 ## 项目结构
 
@@ -88,9 +88,9 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliGestureRemote`。
 
 若使用本项目本地工具缓存中的编译器，可省略 `--compiler`。脚本默认检查 `.tooling/inno/ISCC.exe`，不会自动安装 Inno Setup。编译前确认使用场景符合构建工具的许可。
 
-构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.9.exe`。普通用户分发安装器即可。
+构建得到 `dist/BiliRemote-Desktop.exe` 与 `dist/BiliRemote-Setup-0.5.10.exe`。普通用户分发安装器即可。
 
-分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.9 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
+分发文件名自动读取安卓 `versionName` 和 Windows `AppVersion`，两端版本不一致时停止打包。电脑安装器、安卓 APK、整合 ZIP 和校验 JSON 均带版本号，本文以 0.5.10 为例。`BiliRemote-Desktop.exe` 是安装器使用的内部程序文件，保留固定名称以维持自启、单实例和覆盖升级路径。Android Studio / Gradle 构建的 APK 也使用带版本号的名称。
 
 安装器固定 AppId，沿用实际旧安装路径，正常退出运行中的程序后替换文件。升级不调用旧卸载器，避免清空数据。保留实际自启和桌面快捷方式状态，原本运行的实例安装后恢复到托盘。支持同版本修复，拒绝较低版本降级。
 
@@ -104,7 +104,7 @@ Android Studio 可以打开 `android/`；Windows 也可使用便携构建脚本�
 .\.venv\Scripts\python.exe scripts/build_apk.py
 ```
 
-脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.9.apk`。无需安装到全局工具路径。便携构建中的 Java / javac 使用 256 MiB 堆上限和 2 个可见处理器，降低工作站内存紧张时的构建峰值；这是构建工具限制，不是安卓 App 的运行时内存配置。
+脚本把 JDK 和 Android 工具下载到 `.tooling/`，生成并验证 `dist/bili-remote-0.5.10.apk`。无需安装到全局工具路径。便携构建中的 Java / javac 使用 256 MiB 堆上限和 2 个可见处理器，降低工作站内存紧张时的构建峰值；这是构建工具限制，不是安卓 App 的运行时内存配置。
 
 **从新克隆的仓库不能直接生成可覆盖现有用户版本的 APK。** 维护者必须先把原签名恢复到 `android/signing/app.keystore`。该私钥不在仓库中；旧项目若仍有 `.tooling/debug.keystore`，脚本会核对证书后复制原密钥。密钥缺失或不匹配时停止，不会静默生成不同身份。
 
@@ -124,12 +124,12 @@ node --test tests/*.test.cjs
 .\.venv\Scripts\python.exe scripts/measure_desktop_responsiveness.py --output .tooling/responsiveness.json
 .\.venv\Scripts\python.exe scripts/smoke_installer.py
 .\.venv\Scripts\python.exe scripts/smoke_upgrade.py --baseline .tooling/upgrade-baseline-0.5.2
-.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.9.apk
+.\.venv\Scripts\python.exe scripts/verify_apk_upgrade.py 旧版.apk dist/bili-remote-0.5.10.apk
 ```
 
 遥控器布局另可运行 `python scripts/smoke_remote_layout.py`（需要 `pip install playwright` 和本机 Edge / Chrome）。它用隔离连接夹具验证 7 种屏幕尺寸下的圆环边界、上下左右位置、至少 44px 触控区域和按键指令；并使用真实指针事件检查两种模式的长按切挡、震动、5 挡设置、提示开关保存及连续进度，不代表安卓实机测试。`smoke_desktop_layout.py` 检查 7 组窗口与字体缩放下的真实侧栏导航、按钮换行、底部操作可达、表格滚动及新版滑块指针拖动，不等同于真实多显示器 DPI 切换测试。
 
-升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.7 → 0.5.9 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
+升级基线目录需包含原 `BiliRemote.iss` 和 `BiliRemote-Desktop.exe`。升级冒烟脚本从旧新安装脚本读取版本，当前使用 0.5.9 → 0.5.10 的基线验证。安装与升级冒烟脚本会使用独立程序身份、目录和端口，不应测试在用户正式安装上。
 
 | 已验证范围 | 当前证据 |
 | --- | --- |
@@ -183,7 +183,7 @@ GUI、浏览器及性能检查顺序运行，使用独立数据、端口与实�
 .\.venv\Scripts\python.exe scripts/package_kit.py
 ```
 
-产物是 `dist/bili-remote-kit-0.5.9.zip` 与 `dist/SHA256-0.5.9.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
+产物是 `dist/bili-remote-kit-0.5.10.zip` 与 `dist/SHA256-0.5.10.json`，整合包包含两端安装文件、README 和完整图文文档，校验值使用相对路径区分同名文件。普通用户只需要 Windows 安装包与 Android APK，无需下载全部构建辅助文件。安装包不纳入 Git 历史，可另行作为发布附件分发。
 
 整合脚本只接收当前版本的两端安装包；缺少任一文件即停止，不会回退到无版本号文件或把旧版本混入新整合包。修改项目版本后会生成新的文件名，旧版带版本号的产物不会被覆盖。
 
@@ -194,3 +194,14 @@ GUI、浏览器及性能检查顺序运行，使用独立数据、端口与实�
 图标源文件在 `desktop/assets/` 和 `android/artwork/`。图标绘制脚本为 `scripts/draw_icon.py`、`scripts/draw_android_icon.py`。0.5.9 电脑运行时改用 Qt 绘制控件与抗锯齿图标，Pillow 仍用于图标与文档生成；用户无需另行安装依赖。安卓提供自适应图标与 Android 13 单色图标，电脑使用原生托盘。
 
 文档图片的可复现生成方式见[配图说明](images/README.md)。更新界面后同步重渲染，避免文档与软件实际入口不一致。
+
+
+## 浏览器目标路由
+
+`desktop/targets.py` 对照本地浏览器窗口、应用进程、哔哩哔哩标题和系统媒体标题；标题只用于本机瞬时匹配，不加入默认操作日志。系统媒体只有应用标识，不能等价为已验证网页 URL。自动匹配不确定时停止，明确选择可按系统接口能力控制。
+
+`BrowserManager` 管理两个独立资料目录，原 Edge 使用 `browser-profile`，Chrome 使用 `browser-profile-chrome`。`open_browser.browser` 仅允许 `auto / edge / chrome`，不会接收任意命令或路径。`BrowserController.probe()` 只读网页视频 / 可见状态，普通命令不启动浏览器。实际响应附加 `control_target`，旧安卓忽略该字段仍可工作。
+
+`NativeRoute` 固定媒体会话，倍速长按继续沿用原路由；释放不重新匹配。连续拖动用媒体标识防止切到其他视频。普通浏览器不使用应用级音量代替视频音量。
+
+新增 `tests/test_targets.py` 及 `scripts/smoke_player_selection.py` 检查错误目标、能力边界、选择保留和实际目标标签；`tests/test_browser.py` 对独立 Edge / Chrome 本地视频分别检查完整操作，不改动用户浏览器或真实视频。

@@ -15,13 +15,17 @@ import psutil
 from websockets.asyncio.client import connect
 
 from .windows import data_directory
+from .targets import target_info
 
 PLAYER_SOURCE = (Path(__file__).resolve().parent / "assets/player.js").read_text(encoding="utf-8")
 LOG = logging.getLogger(__name__)
 
 
-def find_browser():
-    for name in ("msedge.exe", "chrome.exe"):
+def find_browser(preferred="auto"):
+    names = {"edge": ("msedge.exe",), "chrome": ("chrome.exe",), "auto": ("msedge.exe", "chrome.exe")}
+    if preferred not in names:
+        raise RuntimeError("未知浏览器选择")
+    for name in names[preferred]:
         for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
             try:
                 with winreg.OpenKey(hive, "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" + name) as key:
@@ -33,10 +37,12 @@ def find_browser():
     for root in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
         if root:
             for relative in ("Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"):
+                if Path(relative).name not in names[preferred]:
+                    continue
                 candidate = Path(root) / relative
                 if candidate.is_file():
                     return candidate
-    raise RuntimeError("未找到 Edge 或 Chrome，请先安装其中一个浏览器")
+    raise RuntimeError("未找到所选浏览器，请先安装 "+({"edge": "Edge", "chrome": "Chrome", "auto": "Edge 或 Chrome"}[preferred]))
 
 
 class BrowserController:
@@ -52,6 +58,20 @@ class BrowserController:
         self.browser_socket = None
         self.lock = asyncio.Lock()
         self.boost = None
+        self.page_hint = None
+
+    def target(self):
+        return target_info(self.executable.name if self.executable else "", "web", toggle=True, seek=True, volume=True, speed=True)
+
+    async def probe(self):
+        """Read readiness without launching, injecting scripts or changing playback."""
+        async with self.lock:
+            try:
+                await self._ensure()
+                pages = await self._pages()
+                return [{"controller": self, "page": page, **state} for page, state in pages]
+            except (RuntimeError, OSError, ValueError):
+                return []
 
     @property
     def running(self):
@@ -158,7 +178,7 @@ class BrowserController:
                 self.browser_process = owner
                 return
         if not allow_launch:
-            raise RuntimeError("未发现可控制的哔哩哔哩播放窗口；请手动打开客户端并播放视频，或在手机设置的“播放器”中点击“在电脑打开哔哩哔哩”")
+            raise RuntimeError("未连接专用网页窗口；普通 Edge / Chrome 可在手机设置的“系统媒体 / 客户端”中检测并选择，完整音量和倍速请点击“在电脑打开哔哩哔哩”")
         self.profile.mkdir(parents=True, exist_ok=True)
         active_port = self.profile / "DevToolsActivePort"
         if not owner:
@@ -202,7 +222,7 @@ class BrowserController:
                     await self.rpc(self.browser_socket, "Target.activateTarget", {"targetId": pages[0]["id"]})
                 else:
                     await self.rpc(self.browser_socket, "Target.createTarget", {"url": self.launch_url})
-            return {"opened": True, "browser": self.executable.name}
+            return {"opened": True, "browser": self.executable.name, "control_target": self.target()}
 
     @staticmethod
     async def rpc(url, method, params=None):
@@ -226,21 +246,38 @@ class BrowserController:
             raise RuntimeError(description.split("\n", 1)[0].removeprefix("Error: "))
         return result.get("result", {}).get("value")
 
-    async def _page(self):
-        await self._ensure()
+    async def _pages(self):
         pages = await asyncio.to_thread(self._json, "/json/list")
         pages = [p for p in pages if p.get("type") == "page" and self.allowed(p.get("url", ""))]
-        best, best_score = None, -1
+        found = []
         for page in pages:
             try:
-                score = await self._evaluate(page, "(() => { const v=[...document.querySelectorAll('video')]; return (v.some(v=>!v.paused)?100:0)+(document.visibilityState==='visible'?10:0)+(v.length?1:0); })()")
-                if score > best_score:
-                    best, best_score = page, score
+                state = await self._evaluate(page, "(() => { const v=[...document.querySelectorAll('video')]; return {playing:v.some(v=>!v.paused),visible:document.visibilityState==='visible',video:!!v.length}; })()")
+                if isinstance(state, dict) and state.get("video"):
+                    found.append((page, state))
             except Exception:
                 continue
-        if not best:
+        return found
+
+    async def _page(self):
+        await self._ensure()
+        pages = await self._pages()
+        hint, self.page_hint = self.page_hint, None
+        if hint:
+            page = next((page for page, state in pages if page["id"] == hint), None)
+            if page:
+                return page
+            raise RuntimeError("所选网页已关闭或视频已变化，请重新选择播放目标")
+        if not pages:
             raise RuntimeError("已打开遥控播放窗口，请在该窗口中打开哔哩哔哩视频")
-        return best
+        active = [(page, state) for page, state in pages if state.get("visible")]
+        if len(active) != 1:
+            active = [(page, state) for page, state in pages if state.get("playing")]
+        if len(active) == 1:
+            return active[0][0]
+        if len(pages) == 1:
+            return pages[0][0]
+        raise RuntimeError("专用窗口有多个视频，无法确定目标；请只保留一个播放标签页")
 
     async def _send(self, page, message, owner):
         payload = json.dumps({**message, "owner": owner}, ensure_ascii=True)
@@ -260,7 +297,7 @@ class BrowserController:
           }
           return await __biliGestureRemote.execute(PAYLOAD);
         })()""".replace("SOURCE", PLAYER_SOURCE).replace("PAYLOAD", payload)
-        return await self._evaluate(page, expression) or {}
+        return {**(await self._evaluate(page, expression) or {}), "control_target": self.target()}
 
     async def _restore(self):
         if self.boost:
@@ -287,6 +324,7 @@ class BrowserController:
                 if self.boost and self.boost["owner"] == owner:
                     if command == "speed_end":
                         await self._restore()
+                        return {"control_target": self.target()}
                     else:
                         self.boost["deadline"] = time.monotonic() + 1.8
                         return await self._send(self.boost["page"], message, owner)
@@ -321,3 +359,72 @@ class BrowserController:
             self.port = None
             self.browser_socket = None
             self.browser_process = None
+
+
+class BrowserManager:
+    """Independent Edge/Chrome profiles; changing the choice never kills a browser."""
+    def __init__(self):
+        self.controllers = {}
+        self.preferred = "auto"
+
+    @property
+    def running(self):
+        return any(controller.running for controller in self.controllers.values())
+
+    @property
+    def executable(self):
+        controller = self.controllers.get(self.preferred)
+        return controller.executable if controller else next((c.executable for c in self.controllers.values() if c.running), None)
+
+    @property
+    def boost(self):
+        return next((c.boost for c in self.controllers.values() if c.boost), None)
+
+    def controller(self, choice):
+        executable = find_browser(choice)
+        key = "edge" if executable.name.lower() == "msedge.exe" else "chrome"
+        if key not in self.controllers:
+            # Preserve the existing Edge profile and its login state.
+            profile = data_directory()/("browser-profile" if key == "edge" else "browser-profile-chrome")
+            self.controllers[key] = BrowserController(profile=profile, executable=executable)
+        return key, self.controllers[key]
+
+    async def open(self, choice="auto"):
+        key, controller = self.controller(choice)
+        result = await controller.open()
+        self.preferred = key
+        return result
+
+    async def candidates(self):
+        for choice in ("edge", "chrome"):
+            with contextlib.suppress(RuntimeError):
+                self.controller(choice)
+        rows = []
+        for controller in self.controllers.values():
+            rows.extend(await controller.probe())
+        return rows
+
+    async def selected(self):
+        if self.preferred in self.controllers:
+            return self.controllers[self.preferred]
+        rows = await self.candidates()
+        controllers = list(dict.fromkeys(row["controller"] for row in rows))
+        if len(controllers) == 1:
+            return controllers[0]
+        if len(controllers) > 1:
+            raise RuntimeError("Edge 和 Chrome 专用窗口同时存在；请在手机选择浏览器并点击“在电脑打开哔哩哔哩”确认目标")
+        _, controller = self.controller("auto")
+        return controller
+
+    async def execute(self, message, owner):
+        return await (await self.selected()).execute(message, owner)
+
+    async def expire(self):
+        expired = False
+        for controller in self.controllers.values():
+            expired = await controller.expire() or expired
+        return expired
+
+    async def close(self):
+        for controller in self.controllers.values():
+            await controller.close()

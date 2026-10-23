@@ -7,6 +7,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 import psutil
+from .targets import browser_name
 
 CLIENT_PATTERN = re.compile(r"bilibili|哔哩|(?:^|[^a-z])(?:bili(?:uwp|app|lite|win|cast|desktop)?|bbll)(?=[^a-z]|$)", re.I)
 
@@ -114,7 +115,9 @@ def combine(installed, running, sessions, browser_connected):
     for row in rows:
         if row["kind"] == "browser":
             supported = row["name"].lower() in {"msedge.exe", "chrome.exe"}
-            row["capabilities"] = "遥控播放窗口运行中" if supported and browser_connected == row["name"].lower() else "可直接打开遥控播放窗口" if supported else "网页完整控制请使用 Edge / Chrome"
+            matching = [s for s in sessions if browser_name(s["id"]) and browser_name(s["id"]) == browser_name(row["name"])]
+            capabilities = " / ".join(title for field, title in (("toggle", "暂停"), ("seek", "进度"), ("speed", "倍速")) if any(s.get(field) for s in matching))
+            row["capabilities"] = "专用网页完整控制" if supported and browser_connected == row["name"].lower() else ("系统媒体："+capabilities if capabilities else "可打开专用网页；当前无媒体会话") if supported else "网页完整控制请使用 Edge / Chrome"
         else:
             matching = [s for s in sessions if _matches(row, s["id"])]
             row["session_ids"] = [s["id"] for s in matching]
