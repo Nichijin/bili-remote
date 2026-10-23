@@ -221,6 +221,7 @@ class Relay:
         import secrets
         owner = secrets.token_hex(12)
         authenticated = False
+        mouse_error_at = -1
         try:
             authenticated = bool(await self.authenticate(websocket))
             if not authenticated:
@@ -244,10 +245,18 @@ class Relay:
                     reply = {"id": message.get("id") if isinstance(message, dict) else None, "ok": False, "error": str(exc)}
                     text = str(exc)
                 except Exception as exc:
-                    LOG.exception("播放器操作失败：%s", exc)
-                    reply = {"id": message.get("id") if isinstance(message, dict) else None, "ok": False, "error": "播放器操作失败，请在电脑上查看状态"}
+                    LOG.exception("遥控操作失败：%s", exc)
+                    failure = "鼠标输入失败，请在电脑上查看状态" if command and command["cmd"].startswith("mouse_") else "播放器操作失败，请在电脑上查看状态"
+                    reply = {"id": message.get("id") if isinstance(message, dict) else None, "ok": False, "error": failure}
                     text = reply["error"]
-                if not command or command["cmd"] not in {"speed_keep", "status", "discover", "mouse_move", "mouse_click", "mouse_keep"} or not reply["ok"]:
+                stream_frame = isinstance(message, dict) and message.get("cmd") == "mouse_frame"
+                if stream_frame:
+                    reply = {"type": "mouse_ack", "mouse_session": message.get("mouse_session"), "seq": message.get("seq"), "ok": reply["ok"], **({"error": reply["error"]} if not reply["ok"] else {})}
+                report = not command or command["cmd"] not in {"speed_keep", "status", "discover", "mouse_frame", "mouse_move", "mouse_click", "mouse_keep"} or not reply["ok"]
+                if stream_frame and not reply["ok"]:
+                    report = time.monotonic()-mouse_error_at >= 1
+                    if report: mouse_error_at = time.monotonic()
+                if report:
                     self.feedback({"ok": reply["ok"], "text": text, "cmd": command["cmd"] if command else "error"})
                 await websocket.send(json.dumps(reply, ensure_ascii=False))
         except (ConnectionClosed, asyncio.TimeoutError, ValueError):

@@ -178,6 +178,43 @@ async def test_mouse_requires_auth_bypasses_media_lock_and_disconnect_invalidate
 
 
 @pytest.mark.asyncio
+async def test_stream_acknowledgements_and_click_barrier_use_authenticated_mode_and_ignore_media_lock(tmp_path):
+    class Input:
+        def __init__(self): self.calls=[]
+        def move(self,dx,dy): self.calls.append((dx,dy))
+        def click(self,button): self.calls.append(button)
+    backend,events=Input(),[]
+    relay=make_relay(tmp_path,events.append)
+    relay.mouse=MouseController(backend)
+    async with serve(relay.handle,"127.0.0.1",0) as server:
+        url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        async with connect(url) as ws:
+            await authenticate(ws,pin=relay.pairing.current())
+            async with relay.command_lock:
+                await ws.send(json.dumps({"cmd":"mouse_start","stream":2,"id":1}))
+                result=json.loads(await asyncio.wait_for(ws.recv(),1))
+                assert result['result']['mouse_stream']==2
+                session=result['result']['mouse_session']
+                for i in range(1,11):
+                    await ws.send(json.dumps({"cmd":"mouse_frame","mouse_session":session,"seq":i,"t":i,"x":i*.35,"y":-i*.5}))
+                for i in range(1,11):
+                    ack=json.loads(await asyncio.wait_for(ws.recv(),1))
+                    assert ack=={"type":"mouse_ack","mouse_session":session,"seq":i,"ok":True}
+                await ws.send(json.dumps({"cmd":"mouse_click","mouse_session":session,"id":2,"button":"left"}))
+                assert json.loads(await ws.recv())["ok"]
+            assert sum(c[0] for c in backend.calls if isinstance(c,tuple))==3
+            assert sum(c[1] for c in backend.calls if isinstance(c,tuple))==-5
+            assert backend.calls[-1]=='left'
+            assert len(events)==1
+            await ws.send(json.dumps({"cmd":"mouse_frame","mouse_session":"b"*24,"seq":11,"t":11,"x":20,"y":0}))
+            assert not json.loads(await ws.recv())["ok"]
+        for _ in range(20):
+            if relay.mouse.owner is None: break
+            await asyncio.sleep(.01)
+        assert relay.mouse.owner is None and relay.mouse.worker is None
+
+
+@pytest.mark.asyncio
 async def test_unrelated_website_cannot_authenticate_even_with_pin(tmp_path):
     relay = make_relay(tmp_path)
     async with serve(relay.handle, "127.0.0.1", 0) as server:

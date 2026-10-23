@@ -1,42 +1,61 @@
-# 鼠标模式实现说明
+# 鼠标模式实现与流畅度验证
 
 [图文使用方法](USAGE.md#鼠标模式) · [项目首页](../README.md)
 
-视频触摸板同一区域两次轻点的间隔不超过 280 ms、距离不超过 28 个 CSS 像素时进入鼠标模式。为避免双击先暂停视频，视频单击等待 280 ms。鼠标模式轻点默认左键，可改为右键；原地长按 500 ms 发一次右键。鼠标双击正常使用，不再进行模式切换，退出使用顶部入口或设置。鼠标移动从首次采样起保留微小位移，累计偏移超过 3 CSS 像素后取消点击 / 长按判定。
+流畅度修复需要两端均为 **0.5.12 或更新版本**。视频触摸板两次轻点的间隔不超过 280 ms、距离不超过 28 CSS 像素时进入。视频单击等待 280 ms 区分双击；鼠标轻点默认左键、长按 500 ms 发一次右键，正常鼠标双击保留。退出使用顶部入口或双指 / Android 返回键打开设置。
 
-## 移动与加速度
+## 旧版为什么卡顿
 
-手机按 Pointer Event 时间戳计算速度，以 CSS 像素归一化，避免 WebView 像素比直接改变手感。加速度只调整每次位移的增益，不对光标位置做延迟插值；手指停止后不产生惯性移动。
+0.5.11 把移动作为普通请求，最多一个请求在途；收到回应后才安排下一次发送。一次往返 40 ms、界面 60 Hz 时，移动发送常落到每 50 ms 一次，即约 20 次 / 秒。单看没有网络延迟的手势测试无法发现这个瓶颈。
 
-设手指速度为 `v`（CSS 像素 / 秒），增益为 `0.65 + 2.85 × clamp(v / 900, 0, 1)`。这是连续的线性增益曲线，低速定位更细，高速最多 3.5 倍。速度使用时间常数 24 ms 的指数平滑；反向或采样间隔超过 80 ms 时重置历史，避免旧速度导致换向飞跳。小数位移累计到后续帧，不因取整丢失微调。
+旧加速度主要依靠相邻两个触点估算瞬时速度。坐标取整、采样间隔变化及微小抖动会改变速度和增益，连续轨迹仍可能出现快慢不均。
 
-这些参数是本项目针对手机相对触摸板选择的初始参数，借鉴 libinput 的速度相关增益、低速减速和方向变化时丢弃旧历史思路，并非移植 libinput 或声称具有相同硬件手感。手机触摸采样、屏幕尺寸、Windows 光标更新、WiFi 延迟都会影响实际表现。
+## 手机采样与加速度
 
-移动按 `requestAnimationFrame` 合并，最多一个请求等待电脑回应，积压时合并未发送的位移；过时的未发送动作丢弃，避免网络恢复后继续回放旧轨迹。点击与移动保持顺序。每次进入模式建立新的会话，退出 / 断线 / 后台时清理队列，电脑端拒绝旧会话的输入。空闲时每秒续期，超过 4 秒失联退出。
+支持时读取 `pointerrawupdate` 和 `getCoalescedEvents`，不支持时使用普通 `pointermove`。按时间戳忽略重复 / 旧样本；保留 CSS 像素归一化，不用 WebView 像素比直接放大移动。采样只更新数值，移动时不创建提示 DOM。
 
-## Windows 输入
+约 32 ms 的位置历史用于估计净移动速度，降低单点量化噪声。停顿超过 80 ms 或明显反向时重新建立速度历史，方向始终跟随当前手指位移，不对方向做延迟滤波。
 
-电脑端通过 `SendInput` 注入，读取当前光标坐标，把手机相对位移转换为整个虚拟桌面的绝对坐标（`MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK`），保留负原点多屏区域，按物理像素计算，限制在桌面边界内。这样不再经过 Windows 相对鼠标速度 / 阈值的二次加速，也不修改用户系统鼠标设置。
+设速度为 `v`（CSS 像素 / 秒），`u = clamp((v - 40) / 1000, 0, 1)`，目标增益为 `0.85 + 2.15 × u² × (3 - 2u)`。低速增益为 0.85，高速最多 3，首尾斜率连续。增益上升时间常数 32 ms、下降 12 ms，用相邻增益的平均值计算位移，避免起步突然放大及减速后仍维持高增益。小数位移累计传输。
 
-鼠标操作使用独立路径，不依赖哔哩哔哩窗口、媒体会话选择或媒体操作锁。高频移动、点击和续期不生成字幕或逐条操作记录，进入、退出与失败仍可反馈。
+该曲线是本项目参数选择，借鉴 libinput 的速度历史、精细定位与方向变化处理思路，没有移植其硬件算法。它平滑的是增益，不产生手指停止后的预测移动。
 
-点击在同一 `SendInput` 批次中发送按下 / 松开，不使用跨网络包维持的按键状态。首次配对和保存授权沿用原来的连接流程；未经认证的连接不能进入鼠标模式。
+## 发送与拥塞处理
 
-`SendInput` 受 Windows UIPI 约束：普通权限软件无法可靠控制权限更高的窗口、UAC 安全桌面和锁屏。软件不会为此自动请求管理员权限。多显示器之间没有屏幕的空白区域由 Windows 自身处理；真实混合 DPI 多屏和实体 Android 的手感仍需实机验证。
+手机按界面帧发送 `mouse_frame`：模式标识、序号、模式内时间戳和累计 `x/y`。移动不等待回应；确认包不建立每帧 Promise 或超时计时器。界面支持 60 / 120 Hz 时可以按相应帧率发送，实际频率仍取决于设备和 WebView。停止采样后最多保留约 32 ms 的空调度窗口，不发送额外位置。
 
-## 资料
+通过三层约束限制积压：浏览器 `bufferedAmount` 超过 1024 字节时暂缓发送、最多 24 个未确认包、最旧未确认包超过 180 ms 时暂缓。暂缓期间只保留当前累计终点，收到确认后合并发送，不保存旧相对移动队列。心跳失败或输入异常退出本次模式，旧模式的迟到确认不能影响新模式。
 
-以下资料已在实现时查阅：
+移动和点击使用同一条有序 WebSocket。点击前发送最新终点，电脑在发送按键前完成最后位置；拥塞阻止刷新时取消点击并反馈，避免点击旧位置。鼠标模式仍使用已配对连接，未认证请求、错误模式标识和无效参数不能注入输入。
 
-- [libinput：Pointer acceleration](https://wayland.freedesktop.org/libinput/doc/latest/pointer-acceleration.html)：速度历史、连续线性加速度、低速精细定位、方向 / 时间变化重置。
-- [Microsoft：SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)：批次顺序、返回数量、结构大小和 UIPI 限制。
-- [Microsoft：MOUSEINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)（亦核对[官方文档源码](https://github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/winuser/ns-winuser-mouseinput.md)）：绝对坐标、虚拟桌面和相对移动的系统加速。
-- [MDN：getCoalescedEvents](https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent/getCoalescedEvents)：合并前采样获取；接口受安全上下文和浏览器支持限制，需提供普通 pointermove 回退。
+## 电脑输出与延迟取舍
 
-## 验证
+`MotionTimeline` 使用约 16 ms 短缓存，根据客户端时间戳在已知轨迹点之间线性插值；没有下一点时停在最后一点，不外推。客户端累计坐标在电脑端转换为整数位移，小数不会按包重复截断。重复 / 乱序包忽略；相对本次模式的最佳到达偏移落后超过 120 ms 时跳过旧轨迹并重设累计基准，避免网络恢复后回放。新一段滑动不会把移动摊到中间的抬手停顿。
 
-`tests/mouse.test.cjs` 检查采样率一致性、低速小数累计、连续增益、换向、每帧合并、单请求在途、点击顺序、积压丢弃和取消后的迟到响应。
+`MotionWorker` 独立线程目标每 8 ms 输出一次，使用 `QueryPerformanceCounter` 时钟与独立的高分辨率等待计时器。这个环境中 Python 3.12 的 `monotonic` 使用约 15.6 ms 分辨率的 `GetTickCount64`，不适合计算 8 ms 的鼠标插值。空闲时线程等待事件，退出释放计时器并停止线程，不修改系统全局计时精度，也不占用 Qt 绘制线程。
 
-`tests/test_mouse.py` 与 `tests/test_relay.py` 检查参数边界、输入结构 ABI、负原点多屏坐标、模式标识、授权、媒体锁隔离、超时与断线清理。
+**插值会增加约 16 ms 缓存及调度等待**，用以换取较均匀的输出。它不能消除 WiFi 固有延迟、严重丢包、系统繁忙或手机低采样率。点击会完成最新终点，退出 / 后台 / 断线则取消尚未输出的轨迹。
 
-`scripts/smoke_mouse_input.py` 只在独立测试窗口内验证真实像素移动及左右键的按下 / 松开消息，并在结束时恢复光标位置。它不操作用户视频或正式安装。
+Windows 仍通过 `SendInput` 的绝对坐标和 `MOUSEEVENTF_VIRTUALDESK` 覆盖整个虚拟桌面，避免叠加系统相对鼠标加速，不改系统鼠标设置。按下 / 松开在同批次注入。移动、点击和确认不逐条更新电脑字幕或日志。
+
+普通权限注入受 UIPI 限制，无法保证控制更高权限窗口、UAC 安全桌面或锁屏。当前提供移动、点击 / 双击与长按右键，不包含按住左键拖拽和双指滚轮。
+
+## 验证方法与证据范围
+
+`node scripts/measure_mouse_motion.cjs --output .tooling/mouse-motion.json` 使用确定性时钟、120 Hz 手指输入及延迟确认，检查 0 / 20 / 40 / 80 ms 往返延迟。60 Hz 界面都保持 60 次发送 / 秒，120 Hz 界面保持 120 次；最终累计位移一致。使用 `--baseline 旧版mouse.js` 可比较 0.5.11：60 Hz 界面在 40 / 80 ms 往返延迟下分别约 20 / 12 次发送 / 秒。该测试不代表真实手机或 WiFi 帧率。
+
+同一量化轨迹下，旧版稳态增益范围约 0.1114，新版约 0.0311，波动范围降低约 72%。这是一条特定轨迹的对照，不代表所有手势的体验改善比例。
+
+`python scripts/measure_mouse_output.py --assert-smooth` 使用真实 Windows 输出线程 / 计时器及捕获后端，输入稳定和轻度抖动的 60 Hz 轨迹，报告输出次数、间隔分位数、精确终点及退出后零输出。它不注入真实桌面，也不测手机、无线传输或显示器扫描。
+
+`tests/mouse.test.cjs`、`tests/test_mouse_motion.py`、`tests/test_relay.py` 覆盖采样率、量化噪声、拥塞合并、点击顺序、鉴权、模式标识、过时包、整数终点和线程清理。`scripts/smoke_mouse_touchpad.py` 在隔离浏览器验证实际指针事件、手势和偏好；`scripts/smoke_mouse_input.py` 只向独立窗口注入真实输入，退出后恢复光标。
+
+实体 Android 的实际触摸 / WebView、真实 WiFi、混合 DPI 多屏与显示器呈现仍需实机验证，不把模拟包频率或线程调用次数等同于用户看到的帧率。
+
+## 查阅资料
+
+- [libinput：Pointer acceleration](https://wayland.freedesktop.org/libinput/doc/latest/pointer-acceleration.html)：速度历史、方向变化和低速定位。
+- [MDN：bufferedAmount](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/bufferedAmount)：已排入但尚未发送的字节。
+- [MDN：pointerrawupdate](https://developer.mozilla.org/en-US/docs/Web/API/Element/pointerrawupdate_event) 与 [getCoalescedEvents](https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent/getCoalescedEvents)：提前采样、合并事件和支持限制。
+- [Microsoft：CreateWaitableTimerExW](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw)（核对[官方源码](https://github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/synchapi/nf-synchapi-createwaitabletimerexw.md)）：Windows 10 1803 起提供独立高分辨率等待计时器。
+- [Microsoft：SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput) 与 [MOUSEINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)：批次顺序、绝对坐标、虚拟桌面及 UIPI。

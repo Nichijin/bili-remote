@@ -86,6 +86,7 @@
           }
           return;
         }
+        if (message.type === "mouse_ack") { this.mouseAcknowledged?.(message); return; }
         const item = this.pending.get(message.id);
         if (!item) return;
         this.timers.clearTimeout(item.timer);
@@ -120,6 +121,13 @@
       const known = remembered || this.computers.find(item => this.config.credentials[item.computer_id]);
       if (known) this.connect(known.host, known.computer_id);
       else if (!this.config.computer_id && this.computers.length === 1) this.connect(this.computers[0].host, this.computers[0].computer_id);
+    }
+    streamMouse(fields) {
+      if (!this.connected || this.socket?.readyState !== 1) throw new Error("鼠标连接已断开");
+      // Do not grow the browser/OS send queue with old relative moves.
+      if ((this.socket.bufferedAmount || 0) > 1024) return false;
+      this.socket.send(JSON.stringify({ cmd: "mouse_frame", ...fields }));
+      return true;
     }
     send(cmd, fields = {}) {
       if (!this.connected || this.socket?.readyState !== 1) return Promise.reject(new Error("电脑尚未连接，请打开连接设置"));

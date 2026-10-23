@@ -6,6 +6,7 @@ import secrets
 import time
 from contextlib import contextmanager
 from ctypes import wintypes
+from .mouse_motion import MotionWorker
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -103,14 +104,18 @@ class WindowsMouse:
 class MouseController:
     LEASE_SECONDS = 4
 
-    def __init__(self, backend=None, clock=time.monotonic):
+    def __init__(self, backend=None, clock=time.monotonic, worker_factory=MotionWorker):
         self.backend, self.clock = backend, clock
+        self.worker_factory, self.worker = worker_factory, None
         self.owner = self.session = None
         self.last_input = 0
 
     def release(self, owner):
         if self.owner == owner:
             self.owner = self.session = None
+            if self.worker:
+                worker, self.worker = self.worker, None
+                worker.close()
 
     def expire(self):
         if self.owner is not None and self.clock() - self.last_input > self.LEASE_SECONDS:
@@ -126,9 +131,12 @@ class MouseController:
                 raise RuntimeError("另一台手机正在使用鼠标模式，请先在该手机退出")
             if self.backend is None:
                 self.backend = WindowsMouse()
+            self.release(owner)
+            if message.get("stream") == 2:
+                self.worker = self.worker_factory(self.backend)
             self.owner, self.session = owner, secrets.token_hex(12)
             self.last_input = self.clock()
-            return {"mouse_session": self.session}
+            return {"mouse_session": self.session, "mouse_stream": 2}
         matches = self.owner == owner and self.session == message["mouse_session"]
         if kind == "mouse_end":
             if matches:
@@ -138,7 +146,16 @@ class MouseController:
             raise RuntimeError("鼠标模式已结束，请重新进入")
         self.last_input = self.clock()
         if kind == "mouse_move":
+            if self.worker:
+                raise RuntimeError("当前为流式鼠标模式，不能混用旧版位移指令")
             self.backend.move(message["dx"], message["dy"])
+        elif kind == "mouse_frame":
+            if not self.worker:
+                raise RuntimeError("未开启流式鼠标，请同时升级两端并重新进入")
+            self.worker.submit(message)
         elif kind == "mouse_click":
-            self.backend.click(message["button"])
+            if self.worker:
+                self.worker.click(message["button"])
+            else:
+                self.backend.click(message["button"])
         return {}

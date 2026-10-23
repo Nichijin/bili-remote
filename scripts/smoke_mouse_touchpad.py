@@ -16,8 +16,8 @@ window.sent=[];window.pulses=0;
 window.WebSocket=class {
  constructor(){this.readyState=0;setTimeout(()=>{this.readyState=1;this.onopen?.()},10)}
  send(text){const q=JSON.parse(text);window.sent.push(q);
-  const result=q.cmd==='mouse_start'?{mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa'}:{time:120,seek_start:0,seek_end:3600,media_key:'fixture-video'};
-  const reply=q.role==='remote'?{type:'auth',ok:true,computer_id:'test-computer',token:'test-key',computer_name:'示例电脑'}:{id:q.id,ok:true,result};
+  const result=q.cmd==='mouse_start'?{mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa',mouse_stream:2}:{time:120,seek_start:0,seek_end:3600,media_key:'fixture-video'};
+  const reply=q.role==='remote'?{type:'auth',ok:true,computer_id:'test-computer',token:'test-key',computer_name:'示例电脑'}:q.cmd==='mouse_frame'?{type:'mouse_ack',ok:true,mouse_session:q.mouse_session,seq:q.seq}:{id:q.id,ok:true,result};
   setTimeout(()=>this.onmessage?.({data:JSON.stringify(reply)}),5)
  }
  close(){this.readyState=3}
@@ -43,7 +43,7 @@ def main():
             page.mouse.down()
             page.mouse.move(250,470,steps=12)
             page.mouse.up()
-            page.wait_for_function("sent.some(q=>q.cmd==='mouse_move' && q.dx>0 && q.dy>0)")
+            page.wait_for_function("sent.some(q=>q.cmd==='mouse_frame' && q.x>0 && q.y>0)")
             assert page.evaluate("sent.every(q=>!['toggle','seek','seek_to','volume','speed_start'].includes(q.cmd))")
             page.mouse.click(180,400)
             page.wait_for_function("sent.some(q=>q.cmd==='mouse_click' && q.button==='left')")

@@ -65,7 +65,7 @@ function holdChanged(rate) {
   byId("holdRate").textContent = `${rate ?? config.rate}×`;
 }
 const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged, tap: (...args) => touchpad.videoTap(...args) });
-const touchpad = new TouchpadController({ video: gestures, send, hint, error, haptic,
+const touchpad = new TouchpadController({ video: gestures, send, stream: fields => connection.streamMouse(fields), hint, error, haptic,
   tapButton: () => config.mouse_tap_button,
   changed: phase => {
     byId("mouseControls").hidden = phase === "video";
@@ -73,6 +73,7 @@ const touchpad = new TouchpadController({ video: gestures, send, hint, error, ha
     byId("pad").setAttribute("aria-label", phase === "video" ? "视频触摸板：轻点播放，双击进入鼠标，滑动调节，长按倍速" : "鼠标触摸板：滑动移动光标，长按右键");
   }
 });
+connection.mouseAcknowledged = message => touchpad.mouse.acknowledge(message);
 const hold = new HoldControl({ send, hint, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged });
 function cancelControls() { touchpad.cancel(); hold.stop(false); speedPointer = null; }
 function connectionState(state) {
@@ -294,7 +295,7 @@ byId("pad").onpointerdown = event => {
   if (pointers.size > 1) { cancelControls(); pointerId = null; window.openSettings(); return; }
   pointerId = event.pointerId; byId("pad").setPointerCapture(event.pointerId); touchpad.down(event.clientX, event.clientY, innerWidth, innerHeight, event.timeStamp);
 };
-byId("pad").onpointermove = event => {
+function padMotion(event) {
   if (event.pointerId !== pointerId) return;
   let samples = [];
   if (touchpad.phase === "mouse" && event.getCoalescedEvents) {
@@ -302,7 +303,11 @@ byId("pad").onpointermove = event => {
   }
   if (samples.length) for (const sample of samples) touchpad.move(sample.clientX, sample.clientY, sample.timeStamp);
   touchpad.move(event.clientX, event.clientY, event.timeStamp);
-};
+}
+byId("pad").onpointermove = padMotion;
+// Supported WebViews can expose samples before the render-aligned pointermove.
+// Duplicate/older timestamps are ignored by PointerAcceleration.
+byId("pad").addEventListener("pointerrawupdate", padMotion);
 function finishPointer(event, canceled) {
   pointers.delete(event.pointerId);
   if (event.pointerId === pointerId) { if (canceled) touchpad.cancel(); else touchpad.up(event.clientX, event.clientY, event.timeStamp); pointerId = null; }

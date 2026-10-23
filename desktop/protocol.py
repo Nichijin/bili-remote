@@ -1,7 +1,7 @@
 """Validate all remote commands before sending them to a player."""
 import math
 
-MOUSE_COMMANDS = {"mouse_start", "mouse_move", "mouse_click", "mouse_keep", "mouse_end"}
+MOUSE_COMMANDS = {"mouse_start", "mouse_move", "mouse_frame", "mouse_click", "mouse_keep", "mouse_end"}
 COMMANDS = {"toggle", "seek", "seek_to", "volume", "speed_start", "speed_change", "speed_keep", "speed_end", "discover", "open_browser", "status"} | MOUSE_COMMANDS
 SPEED_VALUES = {.5, .75, 1, 1.25, 1.5, 2, 2.25, 2.5, 2.75, 3}
 
@@ -14,6 +14,10 @@ def validate(message):
         raise ValueError("未知指令")
     if command in MOUSE_COMMANDS:
         result = {"cmd": command}
+        if command == "mouse_start" and "stream" in message:
+            if type(message["stream"]) is not int or message["stream"] != 2:
+                raise ValueError("不支持的鼠标流版本")
+            result["stream"] = 2
         if command != "mouse_start":
             session = message.get("mouse_session")
             if not isinstance(session, str) or len(session) != 24 or any(c not in "0123456789abcdef" for c in session):
@@ -25,6 +29,16 @@ def validate(message):
                 if isinstance(value, bool) or not isinstance(value, int) or not -8192 <= value <= 8192:
                     raise ValueError("鼠标位移必须是 -8192 到 8192 的整数")
                 result[field] = value
+        elif command == "mouse_frame":
+            for field in ("x", "y", "t"):
+                value = message.get(field)
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > 1_000_000_000 or (field == "t" and value < 0):
+                    raise ValueError("鼠标轨迹数值不正确")
+                result[field] = float(value)
+            seq = message.get("seq")
+            if type(seq) is not int or not 1 <= seq <= 1_000_000_000:
+                raise ValueError("鼠标轨迹序号不正确")
+            result["seq"] = seq
         elif command == "mouse_click":
             button = message.get("button")
             if not isinstance(button, str) or button not in {"left", "right"}:

@@ -1,123 +1,145 @@
 (function (root) {
-  // Velocity controls gain, not pointer interpolation: position never glides on
-  // after the finger stops. CSS pixels make the curve independent of WebView DPR.
+  // Smooth gain, never filter the finger's direction or invent inertial motion.
   class PointerAcceleration {
+    static gain(speed) {
+      const u = Math.max(0, Math.min(1, (speed - 40) / 1000));
+      return .85 + 2.15 * u * u * (3 - 2 * u);
+    }
     reset(x, y, time) {
-      Object.assign(this, { x, y, time, speed: null, lastDX: 0, lastDY: 0 });
+      Object.assign(this, { x, y, time, gain: .85, lastDX: 0, lastDY: 0 });
+      this.history = [{ x, y, time }];
     }
     sample(x, y, time) {
       if (![x, y, time].every(Number.isFinite) || time <= this.time) return { dx: 0, dy: 0 };
       const dx = x - this.x, dy = y - this.y, dt = time - this.time;
+      const reversed = dx * this.lastDX + dy * this.lastDY < 0 && Math.hypot(dx, dy) >= 1.5;
+      if (dt > 80 || reversed) {
+        this.history = [{ x: this.x, y: this.y, time: this.time }];
+        if (dt > 80) this.gain = .85;
+      }
       this.x = x; this.y = y; this.time = time;
-      const speed = Math.hypot(dx, dy) * 1000 / dt;
-      const reversed = dx * this.lastDX + dy * this.lastDY < 0;
-      if (this.speed === null || dt > 80 || reversed) this.speed = speed;
-      else this.speed += (speed - this.speed) * (1 - Math.exp(-dt / 24));
-      this.lastDX = dx; this.lastDY = dy;
-      // Continuous linear gain: precise at low speed, capped at 3.5x at 900px/s.
-      const gain = .65 + Math.min(1, Math.max(0, this.speed / 900)) * 2.85;
+      this.history.push({ x, y, time });
+      while (this.history.length > 2 && this.history[1].time <= time - 32) this.history.shift();
+      const first = this.history[0];
+      const speed = Math.hypot(x - first.x, y - first.y) * 1000 / Math.max(1, time - first.time);
+      const target = PointerAcceleration.gain(speed), previous = this.gain;
+      this.gain += (target - this.gain) * (1 - Math.exp(-dt / (target < this.gain ? 12 : 32)));
+      if (Math.hypot(dx, dy) >= .5) { this.lastDX = dx; this.lastDY = dy; }
+      const gain = (previous + this.gain) / 2;
       return { dx: dx * gain, dy: dy * gain };
     }
   }
 
   class MouseTransport {
-    constructor({ send, error = () => {}, changed = () => {}, timers = root,
+    constructor({ send, stream, error = () => {}, changed = () => {}, timers = root,
                   frames = root, now = () => performance.now() }) {
-      Object.assign(this, { send, error, changed, timers, frames, now });
-      this.generation = 0; this.session = null; this.opening = false;
-      this.inflight = false; this.queue = []; this.frame = null;
-      this.fractionX = this.fractionY = 0;
+      Object.assign(this, { send, stream, error, changed, timers, frames, now });
+      this.generation = 0; this.session = null; this.opening = false; this.frame = null;
+      this.outstanding = new Map(); this.controls = new Set();
+      this.x = this.y = this.seq = 0; this.dirty = false;
+      this.activeUntil = -Infinity;
     }
     async start() {
       this.stop();
       const generation = ++this.generation;
       this.opening = true; this.changed("connecting");
       try {
-        const result = await this.send("mouse_start");
-        if (!/^[0-9a-f]{24}$/.test(result.mouse_session || "")) throw new Error("电脑端未提供鼠标模式，请将两端升级至 0.5.11 或更新版本");
+        const result = await this.send("mouse_start", { stream: 2 });
+        if (!/^[0-9a-f]{24}$/.test(result.mouse_session || "")) throw new Error("电脑端未提供鼠标模式，请同时更新两端");
         if (generation !== this.generation) {
           this.send("mouse_end", { mouse_session: result.mouse_session }).catch(() => {});
           return false;
         }
-        this.session = result.mouse_session; this.opening = false;
+        this.session = result.mouse_session;
+        if (result.mouse_stream !== 2 || !this.stream) throw new Error("流畅鼠标模式需要电脑端与安卓端都升级到 0.5.12 或更新版本");
+        this.opening = false; this.started = this.now(); this.lastTime = 0;
         this.keep = this.timers.setInterval(() => {
-          if (!this.inflight && !this.queue.length) this.command("mouse_keep");
+          if (!this.keeping) {
+            this.keeping = true;
+            this.command("mouse_keep").finally(() => { if (generation === this.generation) this.keeping = false; });
+          }
         }, 1000);
         this.changed("mouse"); return true;
       } catch (failure) {
-        if (generation === this.generation) { this.stop(); this.error(failure); }
+        if (generation === this.generation) this.fail(failure);
         return false;
       }
     }
     stop() {
       const session = this.session;
-      ++this.generation; this.session = null; this.opening = false;
-      this.inflight = false; this.queue = [];
-      this.fractionX = this.fractionY = 0;
+      ++this.generation; this.session = null; this.opening = this.keeping = false;
+      this.outstanding.clear(); this.controls.clear(); this.dirty = false;
+      this.x = this.y = this.seq = 0;
+      this.activeUntil = -Infinity;
       if (this.frame !== null) this.frames.cancelAnimationFrame(this.frame);
       this.frame = null; this.timers.clearInterval(this.keep); this.keep = null;
       if (session) this.send("mouse_end", { mouse_session: session }).catch(() => {});
       this.changed("video");
     }
+    fail(failure) { this.stop(); this.error(failure); }
     move(dx, dy) {
       if (!this.session || ![dx, dy].every(Number.isFinite)) return;
-      this.fractionX += dx; this.fractionY += dy;
-      const x = Math.trunc(this.fractionX), y = Math.trunc(this.fractionY);
-      this.fractionX -= x; this.fractionY -= y;
-      if (!x && !y) return;
-      const tail = this.queue.at(-1), time = this.now();
-      if (tail?.cmd === "mouse_move" && time - tail.time <= 100) {
-        tail.dx = Math.max(-8192, Math.min(8192, tail.dx + x));
-        tail.dy = Math.max(-8192, Math.min(8192, tail.dy + y));
-      } else {
-        // Discard expired unsent motion, never replay an old travel path.
-        if (tail?.cmd === "mouse_move") this.queue.pop();
-        this.queue.push({ cmd: "mouse_move", dx: Math.max(-8192, Math.min(8192, x)), dy: Math.max(-8192, Math.min(8192, y)), time });
-      }
-      this.schedule();
+      this.x += Math.max(-8192, Math.min(8192, dx));
+      this.y += Math.max(-8192, Math.min(8192, dy));
+      if (!dx && !dy) return;
+      this.dirty = true; this.activeUntil = this.now()+32; this.schedule();
     }
     click(button) {
       if (!this.session || !["left", "right"].includes(button)) return;
-      if (this.queue.filter(item => item.cmd === "mouse_click").length >= 4) return;
-      this.queue.push({ cmd: "mouse_click", button, time: this.now() });
-      this.flush();
+      // The stream and click share one ordered socket. The PC flushes the last
+      // position before clicking; a congested socket must never click elsewhere.
+      if (!this.flush() || this.controls.size >= 4) {
+        this.fail(new Error("鼠标连接拥塞，已停止点击；请重新进入鼠标模式")); return;
+      }
+      this.command("mouse_click", { button });
     }
     schedule() {
-      if (this.frame !== null || this.inflight || !this.session || !this.queue.length) return;
-      this.frame = this.frames.requestAnimationFrame(() => { this.frame = null; this.flush(); });
+      if (this.frame !== null || !this.session || (!this.dirty && this.now() >= this.activeUntil)) return;
+      this.frame = this.frames.requestAnimationFrame(() => {
+        this.frame = null; this.flush(); this.schedule();
+      });
     }
     flush() {
-      if (this.inflight || !this.session) return;
-      let item;
-      while ((item = this.queue.shift())) {
-        if (this.now() - item.time <= 150) break;
-        item = null;
-      }
-      if (!item) return;
-      const {cmd, time, ...fields} = item;
-      this.command(cmd, fields);
+      if (!this.session) return false;
+      const time = this.now();
+      const oldest = this.outstanding.values().next().value;
+      if (this.outstanding.size >= 24 || (oldest !== undefined && time - oldest > 180)) return false;
+      if (!this.dirty) return true;
+      const fields = { mouse_session: this.session, seq: this.seq + 1,
+        t: Math.max(this.lastTime, time - this.started),
+        x: Number(this.x.toFixed(4)), y: Number(this.y.toFixed(4)) };
+      try {
+        if (!this.stream(fields)) return false;
+        this.seq = fields.seq; this.lastTime = fields.t;
+        this.outstanding.set(this.seq, time); this.dirty = false;
+        return true;
+      } catch (failure) { this.fail(failure); return false; }
+    }
+    acknowledge(message) {
+      if (!this.session || message.mouse_session !== this.session) return;
+      if (!message.ok) { this.fail(new Error(message.error || "鼠标输入失败")); return; }
+      if (!Number.isInteger(message.seq) || message.seq < 1 || message.seq > this.seq) return;
+      for (const seq of this.outstanding.keys()) if (seq <= message.seq) this.outstanding.delete(seq);
+      this.schedule();
     }
     command(cmd, fields = {}) {
-      if (!this.session || this.inflight) return;
+      if (!this.session) return Promise.resolve();
       const generation = this.generation;
-      this.inflight = true;
-      Promise.resolve().then(() => {
-        if (generation === this.generation) return this.send(cmd, { ...fields, mouse_session: this.session });
-      }).catch(failure => {
-        if (generation === this.generation) { this.stop(); this.error(failure); }
-      }).finally(() => {
-        if (generation === this.generation) { this.inflight = false; this.schedule(); }
-      });
+      const task = this.send(cmd, { ...fields, mouse_session: this.session });
+      this.controls.add(task);
+      return task.catch(failure => {
+        if (generation === this.generation) this.fail(failure);
+      }).finally(() => this.controls.delete(task));
     }
   }
   class TouchpadController {
-    constructor({ video, send, hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
+    constructor({ video, send, stream, hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
                   tapButton = () => "left", timers = root, frames = root,
                   now = () => performance.now() }) {
       Object.assign(this, { video, send, hint, error, haptic, changed, tapButton, timers, now });
       this.phase = "video"; this.current = null; this.pendingTap = null;
       this.acceleration = new PointerAcceleration();
-      this.mouse = new MouseTransport({ send, error, timers, frames, now, changed: phase => {
+      this.mouse = new MouseTransport({ send, stream, error, timers, frames, now, changed: phase => {
         const previous = this.phase; this.phase = phase;
         if (phase !== "mouse") this.cancelTouch();
         this.changed(phase);
@@ -187,7 +209,7 @@
       if (this.phase === "video") { this.video.up(x, y); return; }
       const g = this.current;
       if (this.phase !== "mouse" || !g) return;
-      this.move(x, y, time); this.cancelTouch();
+      this.move(x, y, time); this.cancelTouch(); this.mouse.flush();
       if (g.mode !== "pending") return;
       this.mouse.click(this.tapButton());
     }

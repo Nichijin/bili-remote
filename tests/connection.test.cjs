@@ -76,3 +76,18 @@ test('offline manual address remains saved while reconnect can recover a known o
   assert.equal(connection.socket.url, 'ws://192.168.1.10:8765');
   assert.ok(config.history.some(item => item.host === '192.168.1.99:8765'));
 });
+
+test('streamed motion uses no request promises and bounds browser buffer, generation filters acknowledgements', () => {
+  const {connection}=setup();const acknowledgements=[];
+  connection.mouseAcknowledged=m=>acknowledgements.push(m);
+  assert.throws(()=>connection.streamMouse({seq:1}));
+  connection.connect('192.168.1.5','computer-1234');const old=connection.socket;old.open();
+  old.receive({type:'auth',ok:true,computer_id:'computer-1234',token:'secret'});
+  for(let i=1;i<=10;i++)assert.equal(connection.streamMouse({seq:i}),true);
+  assert.equal(connection.pending.size,0);
+  old.bufferedAmount=1025;assert.equal(connection.streamMouse({seq:11}),false);
+  assert.equal(old.messages.at(-1).seq,10);
+  old.receive({type:'mouse_ack',ok:true,seq:5});assert.equal(acknowledgements.length,1);
+  connection.connect('192.168.1.6','other');old.receive({type:'mouse_ack',ok:false});
+  assert.equal(acknowledgements.length,1);
+});

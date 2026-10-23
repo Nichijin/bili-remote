@@ -5,6 +5,7 @@ No user browser, player, settings or production companion instance is touched.
 import ctypes
 import json
 import sys
+import time
 from ctypes import wintypes
 from pathlib import Path
 
@@ -13,7 +14,8 @@ sys.path.insert(0, str(ROOT))
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-from desktop.mouse import WindowsMouse
+from desktop.mouse import WindowsMouse, MouseController
+from desktop.version import APP_VERSION
 
 
 class Capture(QWidget):
@@ -39,14 +41,18 @@ class Capture(QWidget):
 def main():
     app = QApplication([])
     widget = Capture()
+    area=app.primaryScreen().availableGeometry()
+    widget.move(area.center()-widget.rect().center())
     backend = WindowsMouse()
     user = backend.api
     user.GetForegroundWindow.restype = wintypes.HWND
     user.SetForegroundWindow.argtypes = [wintypes.HWND]
     user.SetForegroundWindow.restype = wintypes.BOOL
+    user.SetWindowPos.argtypes = [wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
     user.WindowFromPoint.argtypes = [wintypes.POINT]
     user.WindowFromPoint.restype = wintypes.HWND
     original = wintypes.POINT()
+    mouse = MouseController(backend)
     with backend.physical_pixels():
         assert user.GetCursorPos(ctypes.byref(original))
     try:
@@ -55,6 +61,7 @@ def main():
         widget.activateWindow()
         QTest.qWait(150)
         hwnd = int(widget.winId())
+        user.SetWindowPos(hwnd,wintypes.HWND(-1),0,0,0,0,0x43)
         user.SetForegroundWindow(hwnd)
         QTest.qWait(100)
         with backend.physical_pixels():
@@ -67,7 +74,7 @@ def main():
         with backend.physical_pixels():
             assert user.GetCursorPos(ctypes.byref(actual))
         assert (actual.x, actual.y) == (target.x, target.y)
-        assert user.WindowFromPoint(actual) == hwnd, "鼠标下方不是测试窗口，已停止点击"
+        assert user.WindowFromPoint(actual) == hwnd, {'hit':user.WindowFromPoint(actual),'fixture':hwnd,'point':(actual.x,actual.y),'fixture_rect':(rect.left,rect.top,rect.right,rect.bottom),'foreground':user.GetForegroundWindow()}
         for button in ("left", "right"):
             assert user.WindowFromPoint(actual) == hwnd
             backend.click(button)
@@ -85,13 +92,27 @@ def main():
         with backend.physical_pixels():
             assert user.GetCursorPos(ctypes.byref(actual))
         assert (actual.x, actual.y) == (target.x+37, target.y-19)
-        result = {"absolute_move_exact_pixels": True, "delta_move_exact_pixels": True,
+        session=mouse.execute({"cmd":"mouse_start","stream":2},"fixture")["mouse_session"]
+        mouse.execute({"cmd":"mouse_frame","mouse_session":session,"seq":1,"t":0,"x":12.75,"y":-8.5},"fixture")
+        deadline=time.perf_counter()+.080
+        while time.perf_counter()<deadline:
+            app.processEvents()
+            time.sleep(.004)  # Release the GIL so the Python output worker runs.
+        with backend.physical_pixels():
+            assert user.GetCursorPos(ctypes.byref(actual))
+        assert (actual.x,actual.y)==(target.x+49,target.y-27), {'actual':(actual.x,actual.y),'expected':(target.x+49,target.y-27),'worker_error':str(mouse.worker.error),'applied':(mouse.worker.timeline.applied_x,mouse.worker.timeline.applied_y)}
+        worker=mouse.worker
+        mouse.release("fixture")
+        assert not worker.thread.is_alive()
+        result = {"source_version": APP_VERSION, "absolute_move_exact_pixels": True, "delta_move_exact_pixels": True,
                   "left_and_right_click_pairs_captured": True, "native_left_double_click_captured": True,
+                  "stream_worker_endpoint_and_teardown": True,
                   "input_confined_to_fixture": True}
         path = ROOT / ".tooling/mouse-input-report.json"
         path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result))
     finally:
+        mouse.release("fixture")
         with backend.physical_pixels():
             current = wintypes.POINT()
             if user.GetCursorPos(ctypes.byref(current)):
