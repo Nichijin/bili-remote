@@ -16,6 +16,7 @@ from websockets.exceptions import ConnectionClosed
 from .browser import BrowserManager
 from .detection import is_client
 from .native import NativeController
+from .mouse import MouseController
 from .pairing import PairingCode
 from .protocol import validate
 from .trust import TrustStore
@@ -43,11 +44,15 @@ def operation_text(command, result):
         return "恢复原播放速度"
     if kind == "open_browser":
         return "已打开哔哩哔哩播放窗口"
+    if kind == "mouse_start":
+        return "鼠标模式已连接"
+    if kind == "mouse_end":
+        return "已退出鼠标模式"
     return "操作完成"
 
 
 class Relay:
-    def __init__(self, native=None, trust=None, pairing=None, browser=None, notify=None, feedback=None, target_notify=None):
+    def __init__(self, native=None, trust=None, pairing=None, browser=None, notify=None, feedback=None, target_notify=None, mouse=None):
         self.native = native or NativeController()
         self.browser = browser or BrowserManager()
         self.trust = trust or TrustStore()
@@ -55,6 +60,7 @@ class Relay:
         self.notify = notify or (lambda text: None)
         self.feedback = feedback or (lambda event: None)
         self.target_notify = target_notify or (lambda target: None)
+        self.mouse = mouse or MouseController()
         self.remote_peers = {}
         self.failed_pins = defaultdict(deque)
         self.total_failures = deque()
@@ -64,7 +70,7 @@ class Relay:
     async def http(self, connection, request):
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return None
-        names = {"/": "index.html", "/app.js": "app.js", "/gestures.js": "gestures.js", "/connection.js": "connection.js", "/remote.js": "remote.js", "/app.css": "app.css"}
+        names = {"/": "index.html", "/app.js": "app.js", "/gestures.js": "gestures.js", "/mouse.js": "mouse.js", "/connection.js": "connection.js", "/remote.js": "remote.js", "/app.css": "app.css"}
         name = names.get(request.path.split("?", 1)[0])
         if not name:
             return connection.respond(HTTPStatus.NOT_FOUND, "Not found")
@@ -161,6 +167,9 @@ class Relay:
         return self.browser
 
     async def execute(self, message, owner):
+        if message["cmd"].startswith("mouse_"):
+            # Never wait for media discovery, WinRT, CDP, or the media lock.
+            return self.mouse.execute(message, owner)
         async with self.command_lock:
             kind = message["cmd"]
             if kind == "discover":
@@ -198,6 +207,7 @@ class Relay:
                 raise
 
     async def release(self, owner):
+        self.mouse.release(owner)
         async with self.command_lock:
             controller = self.held_targets.pop(owner, None)
             if controller:
@@ -237,7 +247,7 @@ class Relay:
                     LOG.exception("播放器操作失败：%s", exc)
                     reply = {"id": message.get("id") if isinstance(message, dict) else None, "ok": False, "error": "播放器操作失败，请在电脑上查看状态"}
                     text = reply["error"]
-                if not command or command["cmd"] not in {"speed_keep", "status", "discover"}:
+                if not command or command["cmd"] not in {"speed_keep", "status", "discover", "mouse_move", "mouse_click", "mouse_keep"} or not reply["ok"]:
                     self.feedback({"ok": reply["ok"], "text": text, "cmd": command["cmd"] if command else "error"})
                 await websocket.send(json.dumps(reply, ensure_ascii=False))
         except (ConnectionClosed, asyncio.TimeoutError, ValueError):
@@ -254,6 +264,7 @@ class Relay:
             await peer.close(1008, "电脑已取消授权")
 
     async def close(self):
+        self.mouse.release(self.mouse.owner)
         for peer in list(self.remote_peers):
             await peer.close(1001, "电脑端已停止")
         for owner in list(self.held_targets):
@@ -265,7 +276,9 @@ class Relay:
     async def watchdog(self):
         while True:
             active = getattr(self.native, "boost", None) or getattr(self.browser, "boost", None)
-            await asyncio.sleep(.25 if active else 1)
+            await asyncio.sleep(.25 if active or self.mouse.owner else 1)
+            if self.mouse.expire():
+                self.feedback({"ok": True, "cmd": "mouse_end", "text": "鼠标连接超时，已退出鼠标模式"})
             for controller in (self.native, self.browser):
                 try:
                     if await controller.expire():

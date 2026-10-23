@@ -8,6 +8,8 @@ button:active{filter:brightness(1.1)}
 svg{display:block;fill:currentColor}
 p{margin:0}
 #pad{position:fixed;inset:0;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
+#mouseControls{position:fixed;z-index:11;top:calc(env(safe-area-inset-top) + 14px);right:calc(env(safe-area-inset-right) + 14px);pointer-events:none}
+#mouseExit{pointer-events:auto;min-height:44px;padding:10px 16px;border:1px solid #ffffff25;border-radius:24px;background:#22262c;color:#e4e8ee;font-size:12px;touch-action:manipulation}
 #remote{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;gap:13px;padding:calc(env(safe-area-inset-top) + 22px) 24px calc(env(safe-area-inset-bottom) + 18px);background:radial-gradient(ellipse at 50% 36%,#1d2024 0,#101214 65%);overflow-y:auto;user-select:none;-webkit-user-select:none;touch-action:pan-y}
 #remote>*{width:100%;max-width:352px;flex-shrink:0}
 .remote-header{display:flex;align-items:center;justify-content:space-between;gap:12px}

@@ -78,7 +78,8 @@ with sync_playwright() as p:
             page.locator('#settings #launchBrowser').click()
             page.wait_for_function('window.sentCommands.filter(m=>m.cmd==="open_browser").length===1 && !document.querySelector("#launchBrowser").disabled')
             assert page.locator('#settings').evaluate('e=>e.open'), 'Opening a player must not submit the settings form'
-            assert '已在电脑打开' in page.locator('#browserMessage').inner_text()
+            assert '已打开' in page.locator('#browserMessage').inner_text()
+            assert page.locator('#target').input_value() == 'browser'
             page.locator('#target').select_option('auto')
             assert page.locator('#nativeSettings').is_hidden()
             page.locator('#rate').select_option('3')

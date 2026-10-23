@@ -13,6 +13,7 @@ config.gears = normalizeGears(config.gears);
 config.rate = config.gears.includes(Number(config.rate)) ? Number(config.rate) : config.gears.includes(2) ? 2 : config.gears[0];
 config.haptics = config.haptics !== false;
 config.show_hints = config.show_hints !== false;
+config.mouse_tap_button = config.mouse_tap_button === "right" ? "right" : "left";
 delete config.token;
 let hudTimer, scanFallback, pairingTarget = null, computerListSignature = "";
 let speedPointer = null;
@@ -63,9 +64,17 @@ function holdChanged(rate) {
   document.querySelectorAll("#speedTrack [data-rate]").forEach(gear => gear.classList.toggle("active", Number(gear.dataset.rate) === (rate ?? config.rate)));
   byId("holdRate").textContent = `${rate ?? config.rate}×`;
 }
-const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged });
+const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged, tap: (...args) => touchpad.videoTap(...args) });
+const touchpad = new TouchpadController({ video: gestures, send, hint, error, haptic,
+  tapButton: () => config.mouse_tap_button,
+  changed: phase => {
+    byId("mouseControls").hidden = phase === "video";
+    byId("mouseExit").textContent = phase === "connecting" ? "连接鼠标中 · 取消" : "鼠标模式 · 返回视频";
+    byId("pad").setAttribute("aria-label", phase === "video" ? "视频触摸板：轻点播放，双击进入鼠标，滑动调节，长按倍速" : "鼠标触摸板：滑动移动光标，长按右键");
+  }
+});
 const hold = new HoldControl({ send, hint, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged });
-function cancelControls() { gestures.cancel(); hold.stop(false); speedPointer = null; }
+function cancelControls() { touchpad.cancel(); hold.stop(false); speedPointer = null; }
 function connectionState(state) {
   byId("connectionStatus").textContent = state.text;
   byId("deviceName").textContent = state.phase === "connected" ? state.name : state.text;
@@ -202,6 +211,10 @@ function setHaptics(enabled) { config.haptics = enabled; renderHaptics(); persis
 byId("haptics").onchange = () => setHaptics(byId("haptics").checked);
 byId("hapticToggle").onclick = () => { setHaptics(!config.haptics); hint(config.haptics ? "震动反馈已开启" : "震动反馈已关闭"); };
 renderHaptics();
+byId("mouseTapButton").value = config.mouse_tap_button;
+byId("mouseTapButton").onchange = () => { cancelControls(); config.mouse_tap_button = byId("mouseTapButton").value; persist(); };
+byId("mouseExit").onclick = () => touchpad.exit();
+byId("enterMouse").onclick = () => { settings.close(); setStyle("touchpad"); touchpad.enter(); };
 byId("host").value = config.host || (location.protocol !== "file:" ? location.host : "");
 if (config.session_id) byId("session").add(new Option(config.session_id, config.session_id));
 byId("session").value = config.session_id || "";
@@ -279,12 +292,20 @@ const pointers = new Set(); let pointerId = null;
 byId("pad").onpointerdown = event => {
   event.preventDefault(); pointers.add(event.pointerId);
   if (pointers.size > 1) { cancelControls(); pointerId = null; window.openSettings(); return; }
-  pointerId = event.pointerId; byId("pad").setPointerCapture(event.pointerId); gestures.down(event.clientX, event.clientY, innerWidth, innerHeight);
+  pointerId = event.pointerId; byId("pad").setPointerCapture(event.pointerId); touchpad.down(event.clientX, event.clientY, innerWidth, innerHeight, event.timeStamp);
 };
-byId("pad").onpointermove = event => { if (event.pointerId === pointerId) gestures.move(event.clientX, event.clientY); };
+byId("pad").onpointermove = event => {
+  if (event.pointerId !== pointerId) return;
+  let samples = [];
+  if (touchpad.phase === "mouse" && event.getCoalescedEvents) {
+    try { samples = event.getCoalescedEvents(); } catch { /* HTTP/older WebView fallback below. */ }
+  }
+  if (samples.length) for (const sample of samples) touchpad.move(sample.clientX, sample.clientY, sample.timeStamp);
+  touchpad.move(event.clientX, event.clientY, event.timeStamp);
+};
 function finishPointer(event, canceled) {
   pointers.delete(event.pointerId);
-  if (event.pointerId === pointerId) { if (canceled) gestures.cancel(); else gestures.up(event.clientX, event.clientY); pointerId = null; }
+  if (event.pointerId === pointerId) { if (canceled) touchpad.cancel(); else touchpad.up(event.clientX, event.clientY, event.timeStamp); pointerId = null; }
 }
 window.addEventListener("pointerup", event => finishPointer(event, false));
 window.addEventListener("pointercancel", event => finishPointer(event, true));

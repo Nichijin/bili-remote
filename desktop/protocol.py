@@ -1,7 +1,8 @@
 """Validate all remote commands before sending them to a player."""
 import math
 
-COMMANDS = {"toggle", "seek", "seek_to", "volume", "speed_start", "speed_change", "speed_keep", "speed_end", "discover", "open_browser", "status"}
+MOUSE_COMMANDS = {"mouse_start", "mouse_move", "mouse_click", "mouse_keep", "mouse_end"}
+COMMANDS = {"toggle", "seek", "seek_to", "volume", "speed_start", "speed_change", "speed_keep", "speed_end", "discover", "open_browser", "status"} | MOUSE_COMMANDS
 SPEED_VALUES = {.5, .75, 1, 1.25, 1.5, 2, 2.25, 2.5, 2.75, 3}
 
 
@@ -9,10 +10,29 @@ def validate(message):
     if not isinstance(message, dict):
         raise ValueError("指令必须是 JSON 对象")
     command = message.get("cmd")
-    if command not in COMMANDS:
+    if not isinstance(command, str) or command not in COMMANDS:
         raise ValueError("未知指令")
+    if command in MOUSE_COMMANDS:
+        result = {"cmd": command}
+        if command != "mouse_start":
+            session = message.get("mouse_session")
+            if not isinstance(session, str) or len(session) != 24 or any(c not in "0123456789abcdef" for c in session):
+                raise ValueError("无效的鼠标模式标识")
+            result["mouse_session"] = session
+        if command == "mouse_move":
+            for field in ("dx", "dy"):
+                value = message.get(field)
+                if isinstance(value, bool) or not isinstance(value, int) or not -8192 <= value <= 8192:
+                    raise ValueError("鼠标位移必须是 -8192 到 8192 的整数")
+                result[field] = value
+        elif command == "mouse_click":
+            button = message.get("button")
+            if not isinstance(button, str) or button not in {"left", "right"}:
+                raise ValueError("未知鼠标按键")
+            result["button"] = button
+        return result
     target = message.get("target", "browser")
-    if target not in {"auto", "browser", "native"}:
+    if not isinstance(target, str) or target not in {"auto", "browser", "native"}:
         raise ValueError("未知播放目标")
     result = {"cmd": command, "target": target}
     if command == "open_browser":

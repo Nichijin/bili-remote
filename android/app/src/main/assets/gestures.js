@@ -1,8 +1,8 @@
 (function (root) {
   const HoldControl = root.HoldControl || (typeof require !== "undefined" ? require("./remote.js").HoldControl : null);
   class GestureEngine {
-    constructor({ send, hint = () => {}, preview, error = () => {}, rate = () => 2, gears = () => [.5, 2, 3], haptic = () => {}, changed = () => {}, timers = globalThis, now = () => Date.now() }) {
-      Object.assign(this, { send, hint, error, rate, timers, now });
+    constructor({ send, hint = () => {}, preview, error = () => {}, rate = () => 2, gears = () => [.5, 2, 3], haptic = () => {}, changed = () => {}, tap = null, timers = globalThis, now = () => Date.now() }) {
+      Object.assign(this, { send, hint, error, rate, tap, timers, now });
       this.preview = preview || (value => hint(`进度 ${value.position.toFixed(1)} / ${value.end.toFixed(1)} 秒`));
       this.hold = new HoldControl({ send, hint, error, rate, gears, haptic, changed, timers });
       this.current = null;
@@ -14,7 +14,7 @@
     }
     down(x, y, width, height) {
       this.cancel(false);
-      const g = { x, y, lastX: x, lastY: y, width, height, mode: "pending", volume: 0 };
+      const g = { x, y, lastX: x, lastY: y, width, height, mode: "pending", volume: 0, started: this.now() };
       this.current = g;
       g.timer = this.timers.setTimeout(() => {
         if (this.current !== g || g.mode !== "pending") return;
@@ -116,7 +116,7 @@
       if (g.mode !== "hold") this.move(x, y);
       this.stopHold(g);
       this.current = null;
-      if (g.mode === "pending") this.emit("toggle");
+      if (g.mode === "pending") { if (this.tap) this.tap(x, y, this.now() - g.started); else this.emit("toggle"); }
       else if (g.mode === "hold") this.hold.stop();
       else if (g.mode === "seek") {
         g.released = true; g.forceFinal = true;

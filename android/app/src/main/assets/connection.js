@@ -125,7 +125,7 @@
       if (!this.connected || this.socket?.readyState !== 1) return Promise.reject(new Error("电脑尚未连接，请打开连接设置"));
       const id = this.nextId++;
       return new Promise((resolve, reject) => {
-        const timer = this.timers.setTimeout(() => { this.pending.delete(id); reject(new Error("电脑未及时回应，请查看电脑端状态")); }, cmd === "open_browser" ? 25000 : 8000);
+        const timer = this.timers.setTimeout(() => { this.pending.delete(id); reject(new Error("电脑未及时回应，请查看电脑端状态")); }, cmd.startsWith("mouse_") ? 1200 : cmd === "open_browser" ? 25000 : 8000);
         this.pending.set(id, { resolve, reject, timer });
         try { this.socket.send(JSON.stringify({ id, cmd, target: this.config.target || "auto", session_id: this.config.session_id || "", ...fields })); }
         catch (error) { this.timers.clearTimeout(timer); this.pending.delete(id); reject(error); }

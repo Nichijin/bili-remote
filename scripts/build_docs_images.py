@@ -107,7 +107,7 @@ def capture_mobile():
                         const reply = request.role === 'remote'
                           ? (__PAIRING__ ? {type: 'auth', ok: false, code: 'pair_required', error: '请先配对', computer_id: sample.computer_id}
                             : {type: 'auth', ok: true, computer_id: sample.computer_id, computer_name: '演示电脑', token: 'documentation-fixture-only'})
-                          : {id: request.id, ok: true, result: {paused: true, volume: 0.5, rate: 1}};
+                          : {id: request.id, ok: true, result: request.cmd === 'mouse_start' ? {mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa'} : {paused: true, volume: 0.5, rate: 1}};
                         setTimeout(() => this.onmessage?.({data: JSON.stringify(reply)}), 50);
                       }
                       close() { this.readyState = 3; }
@@ -134,6 +134,14 @@ def capture_mobile():
                             page.locator("#manualDetails summary").click()
                             page.locator("#launchBrowser").scroll_into_view_if_needed()
                             page.screenshot(path=str(RAW / "mobile-player-settings.png"))
+                        else:
+                            page.mouse.dblclick(180, 400, delay=80)
+                            page.wait_for_function("touchpad.phase === 'mouse'")
+                            page.wait_for_timeout(1800)
+                            page.screenshot(path=str(RAW / "mobile-mouse.png"))
+                            page.evaluate("window.openSettings()")
+                            page.locator("#mouseTitle").scroll_into_view_if_needed()
+                            page.screenshot(path=str(RAW / "mobile-mouse-settings.png"))
                     context.close()
             finally:
                 browser.close()
@@ -272,6 +280,24 @@ def build_gestures():
     image.save(OUTPUT / "gestures.png", optimize=True)
 
 
+def build_mouse():
+    image, draw = canvas(1600, 1000, "触摸板也能控制电脑鼠标", f"{VERSION} · 连点两次进入 · 使用当前页面与示例连接渲染")
+    phone(image, RAW / "mobile-mouse.png", 75, 205, 300)
+    phone(image, RAW / "mobile-mouse-settings.png", 450, 205, 300)
+    text(draw, (92, 895), "鼠标模式：顶部返回视频", 22, MUTED)
+    text(draw, (467, 895), "设置：轻点映射与鼠标入口", 22, MUTED)
+    items = [("01  连点两次进入", "双击不会先暂停视频；顶部入口退出。"),
+             ("02  滑动移动光标", "低速精细定位，高速加速跨屏。"),
+             ("03  点击 / 长按", "轻点左键，长按约 0.5 秒发一次右键。"),
+             ("04  保留鼠标双击", "双击正常使用，顶部或设置退出模式。")]
+    for index, (title, caption) in enumerate(items):
+        y = 225 + index * 160
+        text(draw, (835, y), title, 31, CYAN, True)
+        text(draw, (835, y + 63), caption, 25, MUTED)
+    text(draw, (835, 905), "两端均需 0.5.11 或更新版本。", 24, MUTED)
+    image.save(OUTPUT / "mouse-mode.png", optimize=True)
+
+
 def build_desktop_panels():
     for stem, title, subtitle in [("desktop-main", "电脑端：配对与播放入口", "真实桌面组件渲染 · 配对码、电脑名称与地址为示例"),
                                   ("desktop-players", "电脑端：当前版本与检查更新", "版本检查在后台进行 · 首次进入页面后检查，可手动重试"),
@@ -335,7 +361,7 @@ def main():
     RAW.mkdir(parents=True, exist_ok=True)
     capture_mobile()
     capture_desktop()
-    for renderer in (build_styles, build_mobile_setup, build_redesign, build_connection, build_gestures, build_desktop_panels, build_upgrade, build_hero):
+    for renderer in (build_styles, build_mobile_setup, build_redesign, build_connection, build_gestures, build_mouse, build_desktop_panels, build_upgrade, build_hero):
         renderer()
     print("Documentation images:", OUTPUT)
 

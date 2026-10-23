@@ -8,6 +8,7 @@ from websockets.exceptions import ConnectionClosed
 from desktop.server import Relay
 from desktop.browser import BrowserController
 from desktop.trust import TrustStore
+from desktop.mouse import MouseController
 
 
 class NoNative:
@@ -140,6 +141,40 @@ async def test_gear_changes_stay_on_held_target_and_require_active_hold(tmp_path
     await relay.execute({"cmd": "speed_change", "target": "native", "rate": 3}, "phone")
     assert relay.browser.calls[-1][0]["cmd"] == "speed_change"
     await relay.execute({"cmd": "speed_end", "target": "native"}, "phone")
+
+
+@pytest.mark.asyncio
+async def test_mouse_requires_auth_bypasses_media_lock_and_disconnect_invalidates_session(tmp_path):
+    class Input:
+        def __init__(self): self.calls = []
+        def move(self, dx, dy): self.calls.append((dx, dy))
+        def click(self, button): self.calls.append(button)
+    backend, events = Input(), []
+    relay = make_relay(tmp_path, events.append)
+    relay.mouse = MouseController(backend)
+    async with serve(relay.handle, "127.0.0.1", 0) as server:
+        url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        async with connect(url) as ws:
+            await ws.send(json.dumps({"cmd": "mouse_move", "dx": 8, "dy": 9}))
+            with pytest.raises(ConnectionClosed):
+                await ws.recv()
+        assert not backend.calls
+        async with connect(url) as ws:
+            await authenticate(ws, pin=relay.pairing.current())
+            async with relay.command_lock:
+                await ws.send(json.dumps({"cmd": "mouse_start", "id": 1}))
+                result = json.loads(await asyncio.wait_for(ws.recv(), 1))
+                assert result["ok"]
+                session = result["result"]["mouse_session"]
+                for i in range(20):
+                    await ws.send(json.dumps({"cmd": "mouse_move", "id": i+2, "dx": 2, "dy": -1, "mouse_session": session}))
+                    assert json.loads(await asyncio.wait_for(ws.recv(), 1))["ok"]
+            assert len(events) == 1  # no per-frame GUI/log/subtitle work
+            assert backend.calls == [(2, -1)]*20
+        for _ in range(20):
+            if relay.mouse.owner is None: break
+            await asyncio.sleep(.01)
+        assert relay.mouse.owner is None and not relay.browser.calls
 
 
 @pytest.mark.asyncio
