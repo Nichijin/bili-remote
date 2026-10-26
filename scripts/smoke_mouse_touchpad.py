@@ -7,6 +7,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from desktop.browser import find_browser
+from desktop.version import APP_VERSION
 
 FIXTURE = """
 const sample={schema:2,target:'auto',ui_style:'touchpad',device_id:'test-mouse-phone',host:'127.0.0.1:19999',computer_id:'test-computer',credentials:{'test-computer':'test-key'}};
@@ -58,6 +59,7 @@ def main():
             page.wait_for_function("touchpad.phase==='video'")
             page.evaluate("window.openSettings()")
             assert page.locator("#mouseOutputHz").input_value()=="1000"
+            assert page.locator("#mouseAcceleration").input_value()=="standard"
             page.select_option("#mouseOutputHz", "500")
             page.select_option("#mouseTapButton", "right")
             page.check("#showHints", force=True) if not page.locator("#showHints").is_checked() else None
@@ -81,7 +83,28 @@ def main():
             page.reload()
             page.locator("body.connected").wait_for()
             assert page.evaluate("saved.mouse_tap_button==='left' && saved.mouse_output_hz===500 && !saved.show_hints")
-            page.mouse.dblclick(180,400,delay=80)
+            profile_travel={}
+            for profile in ("off","gentle","standard","strong"):
+                page.evaluate("window.openSettings()")
+                page.select_option("#mouseAcceleration",profile)
+                page.click("#enterMouse")
+                page.wait_for_function("touchpad.phase==='mouse'")
+                profile_travel[profile]=page.evaluate("""() => {
+                  const before=touchpad.mouse.x, time=performance.now();
+                  touchpad.down(50,300,innerWidth,innerHeight,time);
+                  for(let i=1;i<=12;i++)touchpad.move(50+100*i/12,300,time+60*i/12);
+                  touchpad.up(150,300,time+60);
+                  return touchpad.mouse.x-before;
+                }""")
+            assert abs(profile_travel["off"]-100)<1e-7
+            assert 100<profile_travel["gentle"]<profile_travel["standard"]<profile_travel["strong"]
+            page.click("#mouseExit")
+            page.reload()
+            page.locator("body.connected").wait_for()
+            assert page.evaluate("saved.mouse_acceleration==='strong'")
+            page.evaluate("window.openSettings()")
+            assert page.locator("#mouseAcceleration").input_value()=="strong"
+            page.click("#enterMouse")
             page.wait_for_function("touchpad.phase==='mouse'")
             for width,height in [(320,568),(360,640),(390,844),(412,915),(568,320),(844,390),(768,1024)]:
                 page.set_viewport_size({"width":width,"height":height})
@@ -96,10 +119,11 @@ def main():
             page.wait_for_function("touchpad.phase==='video' && !connection.connected")
             page.wait_for_timeout(550)
             assert page.evaluate("sent.every(q=>q.cmd!=='mouse_click')")
-            report={"single_video_tap":True,"double_tap_enters_without_pause":True,"real_pointer_movement":True,
+            report={"version":APP_VERSION,"single_video_tap":True,"double_tap_enters_without_pause":True,"real_pointer_movement":True,
                     "default_left_click":True,"long_right_once_with_haptic":True,"configurable_right_click":True,
                     "normal_double_click_stays_in_mouse_mode":True,"preferences_survive_reload":True,
-                    "exit_accessible_with_hints_hidden":True,"mouse_layout_viewports":7,"output_1000_default_and_500_persisted":True,"background_clears_hold_and_session":True}
+                    "exit_accessible_with_hints_hidden":True,"mouse_layout_viewports":7,"output_1000_default_and_500_persisted":True,"background_clears_hold_and_session":True,
+                    "acceleration_profiles_applied_and_persisted":True,"synthetic_100px_60ms_profile_travel":profile_travel}
             (ROOT / ".tooling/mouse-touchpad-report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
             print(json.dumps(report))
         finally:

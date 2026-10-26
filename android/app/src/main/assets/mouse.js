@@ -1,12 +1,15 @@
 (function (root) {
   // Smooth gain, never filter the finger's direction or invent inertial motion.
   class PointerAcceleration {
-    static gain(speed) {
-      const u = Math.max(0, Math.min(1, (speed - 40) / 1000));
-      return .85 + 2.15 * u * u * (3 - 2 * u);
+    constructor(profile = () => "standard") { this.profile = profile; }
+    static gain(speed, profile = "standard") {
+      if (profile === "off") return 1;
+      const maximum = profile === "gentle" ? 2.3 : profile === "strong" ? 6 : 4;
+      const u = Math.max(0, Math.min(1, (speed - 40) / 1360));
+      return .85 + (maximum - .85) * u * u * (3 - 2 * u);
     }
     reset(x, y, time) {
-      Object.assign(this, { x, y, time, gain: .85, lastDX: 0, lastDY: 0 });
+      Object.assign(this, { x, y, time, gain: PointerAcceleration.gain(0, this.profile()), lastDX: 0, lastDY: 0 });
       this.history = [{ x, y, time }];
     }
     sample(x, y, time) {
@@ -15,17 +18,22 @@
       const reversed = dx * this.lastDX + dy * this.lastDY < 0 && Math.hypot(dx, dy) >= 1.5;
       if (dt > 80 || reversed) {
         this.history = [{ x: this.x, y: this.y, time: this.time }];
-        if (dt > 80) this.gain = .85;
+        if (dt > 80) this.gain = PointerAcceleration.gain(0, this.profile());
       }
       this.x = x; this.y = y; this.time = time;
       this.history.push({ x, y, time });
       while (this.history.length > 2 && this.history[1].time <= time - 32) this.history.shift();
       const first = this.history[0];
       const speed = Math.hypot(x - first.x, y - first.y) * 1000 / Math.max(1, time - first.time);
-      const target = PointerAcceleration.gain(speed), previous = this.gain;
-      this.gain += (target - this.gain) * (1 - Math.exp(-dt / (target < this.gain ? 12 : 32)));
-      if (Math.hypot(dx, dy) >= .5) { this.lastDX = dx; this.lastDY = dy; }
-      const gain = (previous + this.gain) / 2;
+      const target = PointerAcceleration.gain(speed, this.profile()), previous = this.gain;
+      const distance = Math.hypot(dx, dy), length = target < previous ? 4 : 12;
+      // Ramp by travelled distance, not elapsed time. A short fast flick must
+      // not lose gain just because it spends fewer ms in the ramp. Integrate
+      // the exponential exactly so 60/120/240 Hz samples have equal travel.
+      const blend = -Math.expm1(-distance / length);
+      const gain = distance > 0 ? target + (previous - target) * blend * length / distance : previous;
+      this.gain += (target - previous) * blend;
+      if (distance >= .5) { this.lastDX = dx; this.lastDY = dy; }
       return { dx: dx * gain, dy: dy * gain };
     }
   }
@@ -148,12 +156,12 @@
     }
   }
   class TouchpadController {
-    constructor({ video, send, stream, outputHz = () => 1000, hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
+    constructor({ video, send, stream, outputHz = () => 1000, accelerationProfile = () => "standard", hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
                   tapButton = () => "left", timers = root, frames = root,
                   now = () => performance.now() }) {
       Object.assign(this, { video, send, hint, error, haptic, changed, tapButton, timers, now });
       this.phase = "video"; this.current = null; this.pendingTap = null;
-      this.acceleration = new PointerAcceleration();
+      this.acceleration = new PointerAcceleration(accelerationProfile);
       this.mouse = new MouseTransport({ send, stream, outputHz, error, timers, frames, now, changed: phase => {
         const previous = this.phase; this.phase = phase;
         if (phase !== "mouse") this.cancelTouch();

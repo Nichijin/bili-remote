@@ -22,10 +22,10 @@ function setup(options={}) {
 
 test('gain has continuous slope at both ends and increases monotonically without sharp knees', () => {
   const gain=PointerAcceleration.gain;
-  assert.equal(gain(0),.85);assert.equal(gain(2000),3);
+  assert.equal(gain(0),.85);assert.equal(gain(2000),4);
   for(let speed=1;speed<=1500;speed++)assert.ok(gain(speed)+1e-12>=gain(speed-1));
   assert.ok(Math.abs(gain(40.01)-gain(40))<1e-8);
-  assert.ok(Math.abs(gain(1040)-gain(1039.99))<1e-8);
+  assert.ok(Math.abs(gain(1400)-gain(1399.99))<1e-8);
 });
 
 test('equal finger motion at 60/120/240 Hz keeps travel within one percent', () => {
@@ -42,10 +42,38 @@ test('short timestamp history suppresses coordinate quantization and gain ramps 
   const gain=[];
   for(let i=1;i<=150;i++) {x=Math.round(i*1.7);a.sample(x,0,i*8);if(i>10)gain.push(a.gain);}
   assert.ok(Math.max(...gain)-Math.min(...gain)<.035);
-  const b=new PointerAcceleration();b.reset(0,0,0);b.sample(16,0,8);
-  assert.ok(b.gain<1.5);b.sample(0,0,16);assert.ok(b.x===0);
+  const b=new PointerAcceleration();b.reset(0,0,0);const first=b.sample(16,0,8);
+  assert.ok(first.dx>16*.85 && first.dx<16*4);b.sample(0,0,16);assert.ok(b.x===0);
   assert.deepEqual(b.sample(500,0,16),{dx:0,dy:0});
   assert.ok(b.sample(1,0,216).dx<1);
+});
+
+function swipe(distance,duration,hz=120,profile='standard') {
+  const a=new PointerAcceleration(()=>profile);a.reset(0,0,0);let travel=0;
+  const count=Math.max(1,Math.round(duration*hz/1000));
+  for(let i=1;i<=count;i++)travel+=a.sample(distance*i/count,0,duration*i/count).dx;
+  return travel;
+}
+
+test('equal-distance short flicks never travel less than slower swipes, at all input rates',()=>{
+  for(const hz of [60,120,240,1000]) for(const profile of ['gentle','standard','strong']) {
+    for(const distance of [50,100,200]) {
+      let previous=0;
+      for(const duration of [1000,500,250,160,100,60,40]) {
+        const travel=swipe(distance,duration,hz,profile);
+        assert.ok(travel+1e-8>=previous,JSON.stringify({hz,profile,distance,duration,travel,previous}));
+        previous=travel;
+      }
+    }
+  }
+});
+
+test('acceleration profiles separate slow precision from fast crossing and off preserves raw travel',()=>{
+  for(const duration of [1000,160,60])assert.ok(Math.abs(swipe(100,duration,120,'off')-100)<1e-9);
+  const slow=swipe(100,1000),fast=swipe(100,60);
+  assert.ok(slow<100 && fast>slow*3.5);
+  assert.ok(swipe(100,60,120,'gentle')<fast && swipe(100,60,120,'strong')>fast);
+  for(const hz of [60,120,240,1000])assert.ok(Math.abs(swipe(100,60,hz)/fast-1)<.001);
 });
 
 test('fractional cumulative endpoints survive frames without per-frame rounding loss', async () => {

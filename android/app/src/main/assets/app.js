@@ -15,6 +15,7 @@ config.haptics = config.haptics !== false;
 config.show_hints = config.show_hints !== false;
 config.mouse_tap_button = config.mouse_tap_button === "right" ? "right" : "left";
 config.mouse_output_hz = [125, 250, 500, 1000].includes(config.mouse_output_hz) ? config.mouse_output_hz : 1000;
+config.mouse_acceleration = ["off", "gentle", "standard", "strong"].includes(config.mouse_acceleration) ? config.mouse_acceleration : "standard";
 delete config.token;
 let hudTimer, scanFallback, pairingTarget = null, computerListSignature = "";
 let speedPointer = null;
@@ -69,6 +70,7 @@ const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, ra
 const touchpad = new TouchpadController({ video: gestures, send, stream: fields => connection.streamMouse(fields), hint, error, haptic,
   tapButton: () => config.mouse_tap_button,
   outputHz: () => config.mouse_output_hz,
+  accelerationProfile: () => config.mouse_acceleration,
   changed: phase => {
     byId("mouseControls").hidden = phase === "video";
     byId("mouseExit").textContent = phase === "connecting" ? "连接鼠标中 · 取消" : "鼠标模式 · 返回视频";
@@ -218,6 +220,8 @@ byId("mouseTapButton").value = config.mouse_tap_button;
 byId("mouseTapButton").onchange = () => { cancelControls(); config.mouse_tap_button = byId("mouseTapButton").value; persist(); };
 byId("mouseOutputHz").value = config.mouse_output_hz;
 byId("mouseOutputHz").onchange = () => { cancelControls(); config.mouse_output_hz = Number(byId("mouseOutputHz").value); persist(); };
+byId("mouseAcceleration").value = config.mouse_acceleration;
+byId("mouseAcceleration").onchange = () => { cancelControls(); config.mouse_acceleration = byId("mouseAcceleration").value; persist(); };
 byId("mouseExit").onclick = () => touchpad.exit();
 byId("enterMouse").onclick = () => { settings.close(); setStyle("touchpad"); touchpad.enter(); };
 byId("host").value = config.host || (location.protocol !== "file:" ? location.host : "");

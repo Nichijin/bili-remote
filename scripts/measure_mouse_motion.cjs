@@ -51,9 +51,19 @@ function quantization(module){
   return {steady_gain_range:+(Math.max(...gains)-Math.min(...gains)).toFixed(6)};
 }
 
+function flicks(module,profile='standard'){
+  return [1000,500,250,160,100,60,40].map(duration=>{
+    const a=new module.PointerAcceleration(()=>profile);a.reset(0,0,0);let distance=0;
+    const count=Math.round(duration*120/1000);
+    for(let i=1;i<=count;i++)distance+=a.sample(100*i/count,0,duration*i/count).dx;
+    return {finger_distance_css_px:100,duration_ms:duration,input_hz:120,cursor_distance_px:+distance.toFixed(3),effective_gain:+(distance/100).toFixed(4)};
+  });
+}
+
 async function main(){
   const args=process.argv.slice(2),value=name=>args[args.indexOf(name)+1];
-  const report={method:'Deterministic finger traces, sample-triggered sending with render fallback and delayed acknowledgements; not a physical touch/WiFi test',current:[],quantization_current:quantization(current)};
+  const report={method:'Deterministic finger traces, sample-triggered sending with render fallback and delayed acknowledgements; not a physical touch/WiFi test',current:[],quantization_current:quantization(current),acceleration_profiles:Object.fromEntries(['off','gentle','standard','strong'].map(profile=>[profile,flicks(current,profile)]))};
+  if(args.includes('--acceleration-baseline'))report.acceleration_baseline=flicks(require(path.resolve(value('--acceleration-baseline'))));
   for(const refresh of [60,120])for(const rtt of [0,20,40,80])report.current.push(await simulate(current,rtt,refresh));
   for(const hz of [240,1000])report.current.push(await simulate(current,20,60,false,hz));
   if(args.includes('--baseline')){
@@ -62,6 +72,9 @@ async function main(){
   }
   for(const row of report.current){
     if(row.packets_per_second<Math.min(row.input_hz,240)*.95||Math.abs(row.final_x-720)>.001)throw Error('Motion regression: '+JSON.stringify(row));
+  }
+  for(const rows of Object.values(report.acceleration_profiles))for(let i=1;i<rows.length;i++){
+    if(rows[i].cursor_distance_px+1e-6<rows[i-1].cursor_distance_px)throw Error('Short flick acceleration regressed');
   }
   if(args.includes('--output'))fs.writeFileSync(value('--output'),JSON.stringify(report,null,2));
   process.stdout.write(JSON.stringify(report,null,2)+'\n');

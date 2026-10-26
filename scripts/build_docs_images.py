@@ -285,9 +285,9 @@ def build_mouse():
     phone(image, RAW / "mobile-mouse.png", 75, 205, 300)
     phone(image, RAW / "mobile-mouse-settings.png", 450, 205, 300)
     text(draw, (92, 895), "鼠标模式：顶部返回视频", 22, MUTED)
-    text(draw, (467, 895), "设置：轻点映射与鼠标入口", 22, MUTED)
+    text(draw, (467, 895), "设置：加速度与点击映射", 22, MUTED)
     items = [("01  连点两次进入", "双击不会先暂停视频；顶部入口退出。"),
-             ("02  滑动移动光标", "电脑插值输出目标最高 1000 Hz。"),
+             ("02  快滑跨屏，慢滑定位", "加速度可选关闭 / 柔和 / 标准 / 明显。"),
              ("03  点击 / 长按", "轻点左键，长按约 0.5 秒发一次右键。"),
              ("04  保留鼠标双击", "双击正常使用，顶部或设置退出模式。")]
     for index, (title, caption) in enumerate(items):
