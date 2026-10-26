@@ -8,10 +8,10 @@ const session = 'a'.repeat(24);
 function setup(options={}) {
   let time = 0, id = 0;
   const callbacks = new Map(), commands = [], errors = [], phases = [];
-  const timers = {setInterval(fn) {callbacks.set(++id, fn); return id;}, clearInterval(id) {callbacks.delete(id);}};
+  const timers = {setInterval(fn) {callbacks.set(++id, fn); return id;}, clearInterval(id) {callbacks.delete(id);},setTimeout(fn) {callbacks.set(++id,fn);return id;},clearTimeout(id){callbacks.delete(id);}};
   const frames = {requestAnimationFrame(fn) {callbacks.set(++id, fn); return id;}, cancelAnimationFrame(id) {callbacks.delete(id);}};
   const transport = new MouseTransport({
-    send: (cmd, fields) => {commands.push({cmd, ...fields}); return Promise.resolve(cmd === 'mouse_start' ? {mouse_session:session,mouse_stream:2} : options.respond?.(cmd, fields)||{});},
+    send: (cmd, fields) => {commands.push({cmd, ...fields}); return Promise.resolve(cmd === 'mouse_start' ? {mouse_session:session,mouse_stream:2,mouse_output_hz:1000} : options.respond?.(cmd, fields)||{});},
     stream: fields=> {if(options.stream && !options.stream(fields))return false; commands.push({cmd:'mouse_frame',...fields});return true;},
     error: e => errors.push(e.message), changed: value => phases.push(value), timers, frames, now: () => time
   });
@@ -89,6 +89,39 @@ test('click refuses an expired acknowledgement window even with no new motion pe
   assert.equal(a.transport.session,null);assert.ok(!a.commands.some(c=>c.cmd==='mouse_click'));
 });
 
+test('new touch samples can send immediately without a render frame, never repeat unchanged endpoints',async()=>{
+  const a=setup();await a.transport.start();
+  a.transport.move(1,0);a.transport.sampled();
+  assert.equal(a.commands.at(-1).cmd,'mouse_frame');
+  a.ack();a.advance(4);a.transport.move(1,0);a.transport.sampled();
+  assert.equal(a.commands.filter(c=>c.cmd==='mouse_frame').length,2);
+  a.transport.sampled();assert.equal(a.commands.filter(c=>c.cmd==='mouse_frame').length,2);
+  a.transport.stop();
+});
+
+test('acknowledgement releases a coalesced endpoint immediately without waiting for the next render',async()=>{
+  const a=setup();await a.transport.start();
+  for(let i=0;i<24;i++){a.transport.move(1,0);a.transport.sampled();a.advance(2);}
+  a.transport.move(7,0);a.transport.sampled();
+  assert.equal(a.transport.outstanding.size,24);
+  a.ack();
+  assert.equal(a.commands.at(-1).x,31);
+  assert.equal(a.transport.outstanding.size,1);a.transport.stop();
+});
+
+test('selected computer output rate is negotiated without claiming a new touch sample rate',async()=>{
+  const sent=[];
+  const t=new MouseTransport({send:async(cmd,fields)=>{sent.push({cmd,...fields});return cmd==='mouse_start'?{mouse_session:session,mouse_stream:2,mouse_output_hz:500}:{};},stream:()=>true,outputHz:()=>500});
+  await t.start();assert.equal(sent[0].output_hz,500);assert.equal(t.actualOutputHz,500);t.stop();
+});
+
+test('PC without output-rate negotiation is rejected and released instead of falsely showing 1000 Hz',async()=>{
+  const sent=[],errors=[];
+  const t=new MouseTransport({send:async(cmd)=>{sent.push(cmd);return {mouse_session:session,mouse_stream:2};},stream:()=>true,error:e=>errors.push(e.message)});
+  assert.equal(await t.start(),false);assert.equal(t.session,null);
+  assert.ok(errors[0].includes('0.5.13'));assert.deepEqual(sent,['mouse_start','mouse_end']);
+});
+
 test('stream failure stops immediately; late error for an old mode cannot end a new one',async()=>{
   let fail=false;const a=setup({stream:()=>{if(fail)throw Error('closed');return true;}});await a.transport.start();
   a.transport.move(1,0);await a.frame();fail=true;a.transport.move(1,0);await a.frame();
@@ -122,7 +155,7 @@ function padSetup(options={}) {
   let clock=0,id=0; const jobs=new Map(),commands=[],pulses=[];
   const timers={setTimeout(fn,delay){jobs.set(++id,{fn,at:clock+delay});return id;},clearTimeout(id){jobs.delete(id);},setInterval(){return ++id;},clearInterval(){}};
   const frames={requestAnimationFrame(fn){return timers.setTimeout(fn,16);},cancelAnimationFrame(id){timers.clearTimeout(id);}};
-  const send=async(cmd,fields)=>{commands.push({cmd,...fields});return cmd==='mouse_start'?{mouse_session:session,mouse_stream:2}:{};};
+  const send=async(cmd,fields)=>{commands.push({cmd,...fields});return cmd==='mouse_start'?{mouse_session:session,mouse_stream:2,mouse_output_hz:1000}:{};};
   let pad;
   const video=new GestureEngine({send,timers,now:()=>clock,tap:(...args)=>pad.videoTap(...args)});
   const stream=fields=>{commands.push({cmd:'mouse_frame',...fields});return true;};

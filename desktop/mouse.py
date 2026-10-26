@@ -4,6 +4,7 @@ import math
 import os
 import secrets
 import time
+from collections import deque
 from contextlib import contextmanager
 from ctypes import wintypes
 from .mouse_motion import MotionWorker
@@ -43,6 +44,32 @@ def absolute_point(x, y, bounds):
             min(65535, math.floor((y - top + .5) * 65536 / height)))
 
 
+class PointerPosition:
+    """Preserve accumulated motion while SendInput's cursor update is pending."""
+    def __init__(self, point, clock=time.perf_counter):
+        self.target = point
+        self.clock = clock
+        self.recent = deque([(point, clock())], maxlen=128)
+
+    def advance(self, observed, dx, dy, bounds):
+        now = self.clock()
+        while self.recent and now-self.recent[0][1] > .032:
+            self.recent.popleft()
+        # A recent commanded position can be observed while Windows is still
+        # processing the previous input batch. Reusing it as the base loses
+        # motion at 1000 Hz. An unrelated position is a local mouse/system move.
+        if observed != self.target and not any(observed == point for point, _ in self.recent):
+            self.target = observed
+            self.recent.clear()
+            self.recent.append((observed, now))
+        left, top, width, height = bounds
+        x = max(left, min(left+width-1, self.target[0]+dx))
+        y = max(top, min(top+height-1, self.target[1]+dy))
+        self.target = x, y
+        self.recent.append((self.target, now))
+        return self.target
+
+
 class WindowsMouse:
     def __init__(self):
         if os.name != "nt":
@@ -56,6 +83,17 @@ class WindowsMouse:
         self.api.GetSystemMetrics.restype = ctypes.c_int
         self.api.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
         self.api.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        self.position = None
+
+    def begin_motion(self):
+        with self.physical_pixels():
+            point = wintypes.POINT()
+            if not self.api.GetCursorPos(ctypes.byref(point)):
+                raise RuntimeError("无法读取鼠标位置，请确认电脑桌面已解锁")
+            self.position = PointerPosition((point.x, point.y))
+
+    def end_motion(self):
+        self.position = None
 
     @contextmanager
     def physical_pixels(self):
@@ -82,7 +120,8 @@ class WindowsMouse:
             bounds = tuple(self.api.GetSystemMetrics(index) for index in (76, 77, 78, 79))
             if bounds[2] <= 0 or bounds[3] <= 0:
                 raise RuntimeError("无法读取电脑显示区域")
-            x, y = absolute_point(point.x + dx, point.y + dy, bounds)
+            target = self.position.advance((point.x, point.y), dx, dy, bounds) if self.position else (point.x+dx, point.y+dy)
+            x, y = absolute_point(*target, bounds)
             # Absolute movement bypasses Windows relative pointer acceleration:
             # the phone's continuous gain must be applied exactly once.
             self.inject(MOUSEINPUT(dx=x, dy=y, dwFlags=0x0001 | 0x8000 | 0x4000))
@@ -133,10 +172,11 @@ class MouseController:
                 self.backend = WindowsMouse()
             self.release(owner)
             if message.get("stream") == 2:
-                self.worker = self.worker_factory(self.backend)
+                self.worker = self.worker_factory(self.backend, output_hz=message.get("output_hz", 1000))
             self.owner, self.session = owner, secrets.token_hex(12)
             self.last_input = self.clock()
-            return {"mouse_session": self.session, "mouse_stream": 2}
+            return {"mouse_session": self.session, "mouse_stream": 2,
+                    "mouse_output_hz": self.worker.output_hz if self.worker else None}
         matches = self.owner == owner and self.session == message["mouse_session"]
         if kind == "mouse_end":
             if matches:
@@ -158,4 +198,6 @@ class MouseController:
                 self.worker.click(message["button"])
             else:
                 self.backend.click(message["button"])
+        elif kind == "mouse_keep" and self.worker:
+            return {"mouse_output": self.worker.stats()}
         return {}

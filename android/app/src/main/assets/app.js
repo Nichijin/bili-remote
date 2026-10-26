@@ -14,6 +14,7 @@ config.rate = config.gears.includes(Number(config.rate)) ? Number(config.rate) :
 config.haptics = config.haptics !== false;
 config.show_hints = config.show_hints !== false;
 config.mouse_tap_button = config.mouse_tap_button === "right" ? "right" : "left";
+config.mouse_output_hz = [125, 250, 500, 1000].includes(config.mouse_output_hz) ? config.mouse_output_hz : 1000;
 delete config.token;
 let hudTimer, scanFallback, pairingTarget = null, computerListSignature = "";
 let speedPointer = null;
@@ -67,6 +68,7 @@ function holdChanged(rate) {
 const gestures = new GestureEngine({ send, hint, preview: previewSeek, error, rate: () => config.rate, gears: () => config.gears, haptic, changed: holdChanged, tap: (...args) => touchpad.videoTap(...args) });
 const touchpad = new TouchpadController({ video: gestures, send, stream: fields => connection.streamMouse(fields), hint, error, haptic,
   tapButton: () => config.mouse_tap_button,
+  outputHz: () => config.mouse_output_hz,
   changed: phase => {
     byId("mouseControls").hidden = phase === "video";
     byId("mouseExit").textContent = phase === "connecting" ? "连接鼠标中 · 取消" : "鼠标模式 · 返回视频";
@@ -214,6 +216,8 @@ byId("hapticToggle").onclick = () => { setHaptics(!config.haptics); hint(config.
 renderHaptics();
 byId("mouseTapButton").value = config.mouse_tap_button;
 byId("mouseTapButton").onchange = () => { cancelControls(); config.mouse_tap_button = byId("mouseTapButton").value; persist(); };
+byId("mouseOutputHz").value = config.mouse_output_hz;
+byId("mouseOutputHz").onchange = () => { cancelControls(); config.mouse_output_hz = Number(byId("mouseOutputHz").value); persist(); };
 byId("mouseExit").onclick = () => touchpad.exit();
 byId("enterMouse").onclick = () => { settings.close(); setStyle("touchpad"); touchpad.enter(); };
 byId("host").value = config.host || (location.protocol !== "file:" ? location.host : "");
@@ -297,12 +301,14 @@ byId("pad").onpointerdown = event => {
 };
 function padMotion(event) {
   if (event.pointerId !== pointerId) return;
+  if (event.type === "pointerrawupdate" && touchpad.phase !== "mouse") return;
   let samples = [];
   if (touchpad.phase === "mouse" && event.getCoalescedEvents) {
     try { samples = event.getCoalescedEvents(); } catch { /* HTTP/older WebView fallback below. */ }
   }
   if (samples.length) for (const sample of samples) touchpad.move(sample.clientX, sample.clientY, sample.timeStamp);
   touchpad.move(event.clientX, event.clientY, event.timeStamp);
+  if (touchpad.phase === "mouse") touchpad.mouse.sampled();
 }
 byId("pad").onpointermove = padMotion;
 // Supported WebViews can expose samples before the render-aligned pointermove.

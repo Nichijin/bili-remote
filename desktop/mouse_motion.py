@@ -9,7 +9,9 @@ from ctypes import wintypes
 
 
 class MotionTimeline:
-    BUFFER = .016
+    BUFFER = .020
+    MIN_BUFFER = .004
+    MAX_BUFFER = .024
     MAX_AGE = .120
 
     def __init__(self):
@@ -19,6 +21,25 @@ class MotionTimeline:
         self.source_time = 0
         self.x = self.y = 0.0
         self.applied_x = self.applied_y = 0
+        self.buffer = self.BUFFER
+        self.arrivals = deque(maxlen=24)
+        self.last_arrival = None
+
+    def update_buffer(self, gap, now):
+        if self.last_arrival is not None and .0005 <= gap <= .040:
+            jitter = abs((now-self.last_arrival)-gap)
+            self.arrivals.append((gap, min(.012, jitter)))
+            if len(self.arrivals) >= 3:
+                intervals = sorted(row[0] for row in self.arrivals)
+                jitters = sorted(row[1] for row in self.arrivals)
+                interval = intervals[len(intervals)//2]
+                jitter = jitters[round((len(jitters)-1)*.9)]
+                target = max(self.MIN_BUFFER, min(self.MAX_BUFFER, interval+jitter+.001))
+                # Slew by at most 5% of one input interval: timestamps remain
+                # ordered and changing the delay cannot abruptly jump the path.
+                step = gap*.05
+                self.buffer += max(-step, min(step, target-self.buffer))
+        self.last_arrival = now
 
     def submit(self, message, now):
         stamp = message["t"] / 1000
@@ -28,6 +49,7 @@ class MotionTimeline:
         if max(abs(x-self.x), abs(y-self.y)) > 8192:
             raise ValueError("鼠标累计位移变化过大，请重新进入鼠标模式")
         gap = stamp-self.source_time
+        self.update_buffer(gap, now)
         self.seq, self.source_time, self.x, self.y = message["seq"], stamp, x, y
         self.offset = now-stamp if self.offset is None else min(self.offset, now-stamp)
         if now-(stamp+self.offset) > self.MAX_AGE:
@@ -36,7 +58,7 @@ class MotionTimeline:
             self.points.clear()
             self.points.append((now, x, y))
             return True
-        due = stamp+self.offset+self.BUFFER
+        due = stamp+self.offset+self.buffer
         if not self.points or gap > .040:
             self.points.clear()
             self.points.append((now, self.applied_x, self.applied_y))
@@ -106,15 +128,23 @@ class PreciseWait:
 
 
 class MotionWorker:
-    INTERVAL = .008
+    INTERVAL = .001
+    OUTPUT_RATES = {125, 250, 500, 1000}
 
-    def __init__(self, backend, clock=time.perf_counter):
+    def __init__(self, backend, clock=time.perf_counter, output_hz=1000):
+        if type(output_hz) is not int or output_hz not in self.OUTPUT_RATES:
+            raise ValueError("鼠标输出频率必须是 125、250、500 或 1000 Hz")
         self.backend, self.clock = backend, clock
+        self.output_hz, self.interval = output_hz, 1/output_hz
         self.timeline = MotionTimeline()
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.stopped = threading.Event()
         self.error = None
+        self.stats_start = self.clock()
+        self.tick_count = self.move_count = 0
+        if hasattr(self.backend, "begin_motion"):
+            self.backend.begin_motion()
         self.thread = threading.Thread(target=self.run, name="mouse-output", daemon=True)
         self.thread.start()
 
@@ -139,6 +169,21 @@ class MotionWorker:
     def move(self, delta):
         if delta != (0, 0):
             self.backend.move(*delta)
+            self.move_count += 1
+
+    def stats(self):
+        with self.lock:
+            self.check()
+            now = self.clock()
+            duration = max(.001, now-self.stats_start)
+            result = {"target_hz": self.output_hz,
+                      "scheduled_hz": round(self.tick_count/duration, 1),
+                      "position_updates_hz": round(self.move_count/duration, 1),
+                      "interpolation_buffer_ms": round(self.timeline.buffer*1000, 2),
+                      "window_seconds": round(duration, 3)}
+            self.stats_start = now
+            self.tick_count = self.move_count = 0
+            return result
 
     def run(self):
         timer = PreciseWait()
@@ -147,7 +192,7 @@ class MotionWorker:
             while not self.stopped.is_set():
                 self.wake.wait()
                 self.wake.clear()
-                if deadline < self.clock()-self.INTERVAL:
+                if deadline < self.clock()-self.interval:
                     deadline = self.clock()
                 while not self.stopped.is_set():
                     timer.wait(max(0, deadline-self.clock()))
@@ -156,10 +201,11 @@ class MotionWorker:
                     with self.lock:
                         now = self.clock()
                         self.move(self.timeline.tick(now))
+                        self.tick_count += 1
                         pending = self.timeline.pending(now)
-                    deadline += self.INTERVAL
+                    deadline += self.interval
                     if deadline <= now:
-                        deadline = now+self.INTERVAL
+                        deadline = now+self.interval
                     if not pending:
                         break
         except Exception as exc:
@@ -174,3 +220,5 @@ class MotionWorker:
         self.thread.join(timeout=.5)
         if self.thread.is_alive():
             raise RuntimeError("鼠标输出线程尚未停止")
+        if hasattr(self.backend, "end_motion"):
+            self.backend.end_motion()

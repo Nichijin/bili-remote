@@ -5,10 +5,10 @@ const current=require('../android/app/src/main/assets/mouse.js');
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const session='a'.repeat(24);
 
-async function simulate(module,rtt,refresh=60,legacy=false){
+async function simulate(module,rtt,refresh=60,legacy=false,inputHz=120){
   let clock=0,id=0,maxOutstanding=0;const jobs=new Map(),sent=[];
   const schedule=(fn,at)=>{jobs.set(++id,{fn,at});return id;};
-  const timers={setInterval(){return ++id;},clearInterval(){}};
+  const timers={setInterval(){return ++id;},clearInterval(){},setTimeout:(fn,delay)=>schedule(fn,clock+delay),clearTimeout:id=>jobs.delete(id)};
   const frames={requestAnimationFrame:fn=>schedule(fn,(Math.floor((clock+1e-7)/(1000/refresh))+1)*1000/refresh),cancelAnimationFrame:id=>jobs.delete(id)};
   let transport;
   transport=new module.MouseTransport({timers,frames,now:()=>clock,
@@ -17,7 +17,7 @@ async function simulate(module,rtt,refresh=60,legacy=false){
         sent.push({at:clock,dx:fields.dx});
         return new Promise(resolve=>schedule(()=>resolve({}),clock+rtt));
       }
-      return Promise.resolve(cmd==='mouse_start'?{mouse_session:session,mouse_stream:2}:{});
+      return Promise.resolve(cmd==='mouse_start'?{mouse_session:session,mouse_stream:2,mouse_output_hz:1000}:{});
     },
     stream:fields=>{
       sent.push({at:clock,x:fields.x});
@@ -26,7 +26,7 @@ async function simulate(module,rtt,refresh=60,legacy=false){
     }
   });
   await transport.start();
-  for(let i=0;i<240;i++)schedule(()=>transport.move(3,0),i*1000/120);
+  for(let i=0;i<inputHz*2;i++)schedule(()=>{transport.move(360/inputHz,0);transport.sampled?.();},i*1000/inputHz);
   while(jobs.size){
     const [key,job]=[...jobs].sort((a,b)=>a[1].at-b[1].at||a[0]-b[0])[0];
     if(job.at>2500)break;
@@ -35,7 +35,7 @@ async function simulate(module,rtt,refresh=60,legacy=false){
   }
   const steady=sent.filter(p=>p.at>=500&&p.at<2000);
   const intervals=steady.slice(1).map((p,i)=>p.at-steady[i].at);
-  const result={rtt_ms:rtt,display_hz:refresh,packets_per_second:+(steady.length/1.5).toFixed(2),
+  const result={rtt_ms:rtt,display_hz:refresh,input_hz:inputHz,packets_per_second:+(steady.length/1.5).toFixed(2),
     largest_send_gap_ms:+Math.max(...intervals).toFixed(3),
     final_x:legacy?sent.reduce((sum,p)=>sum+p.dx,0):sent.at(-1)?.x,
     outstanding_limit:legacy?1:24,maximum_observed_outstanding:maxOutstanding};
@@ -53,14 +53,15 @@ function quantization(module){
 
 async function main(){
   const args=process.argv.slice(2),value=name=>args[args.indexOf(name)+1];
-  const report={method:'Deterministic 120 Hz finger trace, render-aligned frame clock, delayed acknowledgements; not a physical WiFi latency test',current:[],quantization_current:quantization(current)};
+  const report={method:'Deterministic finger traces, sample-triggered sending with render fallback and delayed acknowledgements; not a physical touch/WiFi test',current:[],quantization_current:quantization(current)};
   for(const refresh of [60,120])for(const rtt of [0,20,40,80])report.current.push(await simulate(current,rtt,refresh));
+  for(const hz of [240,1000])report.current.push(await simulate(current,20,60,false,hz));
   if(args.includes('--baseline')){
     const baseline=require(path.resolve(value('--baseline')));report.baseline=[];report.quantization_baseline=quantization(baseline);
     for(const rtt of [0,20,40,80])report.baseline.push(await simulate(baseline,rtt,60,true));
   }
   for(const row of report.current){
-    if(row.packets_per_second<row.display_hz*.95||Math.abs(row.final_x-720)>.001)throw Error('Motion regression: '+JSON.stringify(row));
+    if(row.packets_per_second<Math.min(row.input_hz,240)*.95||Math.abs(row.final_x-720)>.001)throw Error('Motion regression: '+JSON.stringify(row));
   }
   if(args.includes('--output'))fs.writeFileSync(value('--output'),JSON.stringify(report,null,2));
   process.stdout.write(JSON.stringify(report,null,2)+'\n');

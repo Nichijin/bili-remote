@@ -31,20 +31,21 @@
   }
 
   class MouseTransport {
-    constructor({ send, stream, error = () => {}, changed = () => {}, timers = root,
+    constructor({ send, stream, outputHz = () => 1000, error = () => {}, changed = () => {}, timers = root,
                   frames = root, now = () => performance.now() }) {
-      Object.assign(this, { send, stream, error, changed, timers, frames, now });
+      Object.assign(this, { send, stream, outputHz, error, changed, timers, frames, now });
       this.generation = 0; this.session = null; this.opening = false; this.frame = null;
       this.outstanding = new Map(); this.controls = new Set();
       this.x = this.y = this.seq = 0; this.dirty = false;
       this.activeUntil = -Infinity;
+      this.sampleTimer = null; this.lastSentAt = -Infinity;
     }
     async start() {
       this.stop();
       const generation = ++this.generation;
       this.opening = true; this.changed("connecting");
       try {
-        const result = await this.send("mouse_start", { stream: 2 });
+        const result = await this.send("mouse_start", { stream: 2, output_hz: this.outputHz() });
         if (!/^[0-9a-f]{24}$/.test(result.mouse_session || "")) throw new Error("电脑端未提供鼠标模式，请同时更新两端");
         if (generation !== this.generation) {
           this.send("mouse_end", { mouse_session: result.mouse_session }).catch(() => {});
@@ -52,6 +53,8 @@
         }
         this.session = result.mouse_session;
         if (result.mouse_stream !== 2 || !this.stream) throw new Error("流畅鼠标模式需要电脑端与安卓端都升级到 0.5.12 或更新版本");
+        if (result.mouse_output_hz !== this.outputHz()) throw new Error("所选输出频率需要电脑端与安卓端都升级到 0.5.13 或更新版本");
+        this.actualOutputHz = result.mouse_output_hz;
         this.opening = false; this.started = this.now(); this.lastTime = 0;
         this.keep = this.timers.setInterval(() => {
           if (!this.keeping) {
@@ -71,6 +74,8 @@
       this.outstanding.clear(); this.controls.clear(); this.dirty = false;
       this.x = this.y = this.seq = 0;
       this.activeUntil = -Infinity;
+      this.lastSentAt = -Infinity;
+      this.timers.clearTimeout(this.sampleTimer); this.sampleTimer = null;
       if (this.frame !== null) this.frames.cancelAnimationFrame(this.frame);
       this.frame = null; this.timers.clearInterval(this.keep); this.keep = null;
       if (session) this.send("mouse_end", { mouse_session: session }).catch(() => {});
@@ -93,6 +98,15 @@
       }
       this.command("mouse_click", { button });
     }
+    sampled() {
+      if (!this.session || !this.dirty) return;
+      const delay = 1-(this.now()-this.lastSentAt);
+      if (delay <= 0) { this.flush(); return; }
+      if (this.sampleTimer === null) this.sampleTimer = this.timers.setTimeout(() => {
+        this.sampleTimer = null;
+        if (this.session) this.flush();
+      }, delay);
+    }
     schedule() {
       if (this.frame !== null || !this.session || (!this.dirty && this.now() >= this.activeUntil)) return;
       this.frame = this.frames.requestAnimationFrame(() => {
@@ -111,6 +125,7 @@
       try {
         if (!this.stream(fields)) return false;
         this.seq = fields.seq; this.lastTime = fields.t;
+        this.lastSentAt = time;
         this.outstanding.set(this.seq, time); this.dirty = false;
         return true;
       } catch (failure) { this.fail(failure); return false; }
@@ -120,7 +135,7 @@
       if (!message.ok) { this.fail(new Error(message.error || "鼠标输入失败")); return; }
       if (!Number.isInteger(message.seq) || message.seq < 1 || message.seq > this.seq) return;
       for (const seq of this.outstanding.keys()) if (seq <= message.seq) this.outstanding.delete(seq);
-      this.schedule();
+      this.sampled(); this.schedule();
     }
     command(cmd, fields = {}) {
       if (!this.session) return Promise.resolve();
@@ -133,17 +148,17 @@
     }
   }
   class TouchpadController {
-    constructor({ video, send, stream, hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
+    constructor({ video, send, stream, outputHz = () => 1000, hint = () => {}, error = () => {}, haptic = () => {}, changed = () => {},
                   tapButton = () => "left", timers = root, frames = root,
                   now = () => performance.now() }) {
       Object.assign(this, { video, send, hint, error, haptic, changed, tapButton, timers, now });
       this.phase = "video"; this.current = null; this.pendingTap = null;
       this.acceleration = new PointerAcceleration();
-      this.mouse = new MouseTransport({ send, stream, error, timers, frames, now, changed: phase => {
+      this.mouse = new MouseTransport({ send, stream, outputHz, error, timers, frames, now, changed: phase => {
         const previous = this.phase; this.phase = phase;
         if (phase !== "mouse") this.cancelTouch();
         this.changed(phase);
-        if (phase === "mouse") { this.haptic(); this.hint("鼠标模式 · 滑动移动光标"); }
+        if (phase === "mouse") { this.haptic(); this.hint(`鼠标模式 · 电脑输出目标 ${this.mouse.actualOutputHz} Hz`); }
         else if (phase === "connecting") this.hint("正在连接鼠标模式…");
         else if (previous !== "video") this.hint("已返回视频触摸板");
       } });

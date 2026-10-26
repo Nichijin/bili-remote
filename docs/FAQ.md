@@ -139,11 +139,11 @@
 
 | 文件 | 用途 | 普通用户是否需要 |
 | --- | --- | --- |
-| `BiliRemote-Setup-0.5.12.exe` | Windows 安装包，支持升级和卸载 | 电脑需要 |
-| `bili-remote-0.5.12.apk` | 安卓安装包 | 手机需要 |
+| `BiliRemote-Setup-0.5.13.exe` | Windows 安装包，支持升级和卸载 | 电脑需要 |
+| `bili-remote-0.5.13.apk` | 安卓安装包 | 手机需要 |
 | `BiliRemote-Desktop.exe` | 电脑程序本体，构建及安装器使用 | 安装版用户不必单独下载 |
-| `bili-remote-kit-0.5.12.zip` | 两端文件与说明的集合 | 可选，内容与单独文件重叠 |
-| `SHA256-0.5.12.json` | 文件校验值 | 可选 |
+| `bili-remote-kit-0.5.13.zip` | 两端文件与说明的集合 | 可选，内容与单独文件重叠 |
+| `SHA256-0.5.13.json` | 文件校验值 | 可选 |
 
 文件名中的 0.5.6 是版本号示例，后续版本会自动替换。通常只需下载对应版本的 Windows 安装包和安卓 APK。
 | APK 的 `.idsig` | Android 增量签名辅助文件 | 普通手动安装不需要 |
@@ -161,7 +161,7 @@ Windows 使用新版安装器覆盖旧版，保留原目录和数据；安卓使
 优先使用 **Android Studio 官方模拟器**，创建 Android 8 或更新版本的虚拟设备，启动后把 APK 拖入安装，或在已安装 Android SDK Platform-Tools 的情况下执行：
 
 ```powershell
-adb install -r dist/bili-remote-0.5.12.apk
+adb install -r dist/bili-remote-0.5.13.apk
 ```
 
 模拟器访问宿主电脑服务时，手动输入 `10.0.2.2:8765`。模拟器的虚拟网络不一定转发局域网广播，因此手动连接成功不代表真实 WiFi 自动发现已验证。长按、取消触摸、前后台切换和多点触摸仍应补充实机检查；电脑鼠标不能完整替代所有手机触摸行为。

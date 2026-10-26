@@ -68,22 +68,38 @@ def main():
             rect = wintypes.RECT()
             assert user.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect))
             target = wintypes.POINT((rect.left+rect.right)//2, (rect.top+rect.bottom)//2)
-        backend.move(target.x-original.x, target.y-original.y)
+            current = wintypes.POINT()
+            assert user.GetCursorPos(ctypes.byref(current))
+        # Window activation can move the cursor; original is only for restoration.
+        backend.move(target.x-current.x, target.y-current.y)
         QTest.qWait(40)
         actual = wintypes.POINT()
         with backend.physical_pixels():
             assert user.GetCursorPos(ctypes.byref(actual))
-        assert (actual.x, actual.y) == (target.x, target.y)
-        assert user.WindowFromPoint(actual) == hwnd, {'hit':user.WindowFromPoint(actual),'fixture':hwnd,'point':(actual.x,actual.y),'fixture_rect':(rect.left,rect.top,rect.right,rect.bottom),'foreground':user.GetForegroundWindow()}
+        assert (actual.x, actual.y) == (target.x, target.y), {
+            'actual': (actual.x,actual.y), 'target': (target.x,target.y),
+            'base': (current.x,current.y), 'original': (original.x,original.y)}
+
+        def assert_fixture():
+            with backend.physical_pixels():
+                assert user.GetCursorPos(ctypes.byref(actual))
+                hit = user.WindowFromPoint(actual)
+            assert hit == hwnd, {'hit':hit,'fixture':hwnd,'point':(actual.x,actual.y),
+                                 'fixture_rect':(rect.left,rect.top,rect.right,rect.bottom),
+                                 'foreground':user.GetForegroundWindow()}
+
+        assert_fixture()
         for button in ("left", "right"):
-            assert user.WindowFromPoint(actual) == hwnd
+            assert_fixture()
             backend.click(button)
             QTest.qWait(30)
         assert widget.events == [("down", "LeftButton"), ("up", "LeftButton"),
                                  ("down", "RightButton"), ("up", "RightButton")], widget.events
         QTest.qWait(user.GetDoubleClickTime()+20)
+        assert_fixture()
         backend.click("left")
         QTest.qWait(80)
+        assert_fixture()
         backend.click("left")
         QTest.qWait(30)
         assert ("double", "LeftButton") in widget.events, widget.events

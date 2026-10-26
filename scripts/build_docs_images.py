@@ -107,7 +107,7 @@ def capture_mobile():
                         const reply = request.role === 'remote'
                           ? (__PAIRING__ ? {type: 'auth', ok: false, code: 'pair_required', error: '请先配对', computer_id: sample.computer_id}
                             : {type: 'auth', ok: true, computer_id: sample.computer_id, computer_name: '演示电脑', token: 'documentation-fixture-only'})
-                          : {id: request.id, ok: true, result: request.cmd === 'mouse_start' ? {mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa',mouse_stream:2} : {paused: true, volume: 0.5, rate: 1}};
+                          : {id: request.id, ok: true, result: request.cmd === 'mouse_start' ? {mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa',mouse_stream:2,mouse_output_hz:request.output_hz||1000} : {paused: true, volume: 0.5, rate: 1}};
                         setTimeout(() => this.onmessage?.({data: JSON.stringify(reply)}), 50);
                       }
                       close() { this.readyState = 3; }
@@ -287,14 +287,14 @@ def build_mouse():
     text(draw, (92, 895), "鼠标模式：顶部返回视频", 22, MUTED)
     text(draw, (467, 895), "设置：轻点映射与鼠标入口", 22, MUTED)
     items = [("01  连点两次进入", "双击不会先暂停视频；顶部入口退出。"),
-             ("02  滑动移动光标", "低速精细定位，高速加速跨屏。"),
+             ("02  滑动移动光标", "电脑插值输出目标最高 1000 Hz。"),
              ("03  点击 / 长按", "轻点左键，长按约 0.5 秒发一次右键。"),
              ("04  保留鼠标双击", "双击正常使用，顶部或设置退出模式。")]
     for index, (title, caption) in enumerate(items):
         y = 225 + index * 160
         text(draw, (835, y), title, 31, CYAN, True)
         text(draw, (835, y + 63), caption, 25, MUTED)
-    text(draw, (835, 905), "流畅鼠标需两端均为 0.5.12 或更新版本。", 24, MUTED)
+    text(draw, (835, 905), "1000 Hz 需两端均为 0.5.13 或更新版本。", 24, MUTED)
     image.save(OUTPUT / "mouse-mode.png", optimize=True)
 
 

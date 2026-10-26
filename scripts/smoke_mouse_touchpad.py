@@ -16,7 +16,7 @@ window.sent=[];window.pulses=0;
 window.WebSocket=class {
  constructor(){this.readyState=0;setTimeout(()=>{this.readyState=1;this.onopen?.()},10)}
  send(text){const q=JSON.parse(text);window.sent.push(q);
-  const result=q.cmd==='mouse_start'?{mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa',mouse_stream:2}:{time:120,seek_start:0,seek_end:3600,media_key:'fixture-video'};
+  const result=q.cmd==='mouse_start'?{mouse_session:'aaaaaaaaaaaaaaaaaaaaaaaa',mouse_stream:2,mouse_output_hz:q.output_hz||1000}:{time:120,seek_start:0,seek_end:3600,media_key:'fixture-video'};
   const reply=q.role==='remote'?{type:'auth',ok:true,computer_id:'test-computer',token:'test-key',computer_name:'示例电脑'}:q.cmd==='mouse_frame'?{type:'mouse_ack',ok:true,mouse_session:q.mouse_session,seq:q.seq}:{id:q.id,ok:true,result};
   setTimeout(()=>this.onmessage?.({data:JSON.stringify(reply)}),5)
  }
@@ -57,11 +57,14 @@ def main():
             page.click("#mouseExit")
             page.wait_for_function("touchpad.phase==='video'")
             page.evaluate("window.openSettings()")
+            assert page.locator("#mouseOutputHz").input_value()=="1000"
+            page.select_option("#mouseOutputHz", "500")
             page.select_option("#mouseTapButton", "right")
             page.check("#showHints", force=True) if not page.locator("#showHints").is_checked() else None
             page.uncheck("#showHints")
             page.click("#enterMouse")
             page.wait_for_function("touchpad.phase==='mouse'")
+            assert page.evaluate("sent.filter(q=>q.cmd==='mouse_start').at(-1).output_hz") == 500
             assert page.locator("#mouseExit").is_visible()
             page.mouse.click(180,400)
             page.wait_for_function("sent.filter(q=>q.cmd==='mouse_click' && q.button==='right').length===2")
@@ -77,7 +80,7 @@ def main():
             page.wait_for_function("touchpad.phase==='video'")
             page.reload()
             page.locator("body.connected").wait_for()
-            assert page.evaluate("saved.mouse_tap_button==='left' && !saved.show_hints")
+            assert page.evaluate("saved.mouse_tap_button==='left' && saved.mouse_output_hz===500 && !saved.show_hints")
             page.mouse.dblclick(180,400,delay=80)
             page.wait_for_function("touchpad.phase==='mouse'")
             for width,height in [(320,568),(360,640),(390,844),(412,915),(568,320),(844,390),(768,1024)]:
@@ -96,7 +99,7 @@ def main():
             report={"single_video_tap":True,"double_tap_enters_without_pause":True,"real_pointer_movement":True,
                     "default_left_click":True,"long_right_once_with_haptic":True,"configurable_right_click":True,
                     "normal_double_click_stays_in_mouse_mode":True,"preferences_survive_reload":True,
-                    "exit_accessible_with_hints_hidden":True,"mouse_layout_viewports":7,"background_clears_hold_and_session":True}
+                    "exit_accessible_with_hints_hidden":True,"mouse_layout_viewports":7,"output_1000_default_and_500_persisted":True,"background_clears_hold_and_session":True}
             (ROOT / ".tooling/mouse-touchpad-report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
             print(json.dumps(report))
         finally:

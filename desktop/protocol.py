@@ -18,6 +18,11 @@ def validate(message):
             if type(message["stream"]) is not int or message["stream"] != 2:
                 raise ValueError("不支持的鼠标流版本")
             result["stream"] = 2
+        if command == "mouse_start" and "output_hz" in message:
+            value = message["output_hz"]
+            if type(value) is not int or value not in {125, 250, 500, 1000}:
+                raise ValueError("鼠标输出频率必须是 125、250、500 或 1000 Hz")
+            result["output_hz"] = value
         if command != "mouse_start":
             session = message.get("mouse_session")
             if not isinstance(session, str) or len(session) != 24 or any(c not in "0123456789abcdef" for c in session):

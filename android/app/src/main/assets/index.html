@@ -40,8 +40,9 @@
     </div><p class="section-note">默认 0.5 / 2 / 3 倍，从 2 倍开始。左右滑动换挡，松手恢复原速。</p></section>
     <section class="settings-section" aria-labelledby="mouseTitle"><div class="section-title"><h3 id="mouseTitle">鼠标触摸板</h3></div><div class="settings-card">
       <label class="setting-row"><span>轻点模拟</span><select id="mouseTapButton"><option value="left">鼠标左键</option><option value="right">鼠标右键</option></select></label>
+      <label class="setting-row"><span>电脑插值输出</span><select id="mouseOutputHz"><option value="125">125 Hz</option><option value="250">250 Hz</option><option value="500">500 Hz</option><option value="1000" selected>1000 Hz</option></select></label>
       <button type="button" id="enterMouse" class="launch-browser">进入鼠标模式</button>
-    </div><p class="section-note">视频触摸板连点两次进入，滑动移动光标，轻点左键、长按约 0.5 秒发一次右键。鼠标双击正常使用；顶部入口返回视频，双指或返回键打开设置并退出鼠标模式。</p></section>
+    </div><p class="section-note">1000 Hz 是电脑插值输出目标，实际受系统负载影响；手机触摸采样与屏幕刷新率不因此提高，低速时只在坐标变化时输出。耗电或负载较高时可降低档位。视频触摸板双击进入；轻点左键、长按右键，顶部或设置退出。</p></section>
     <section class="settings-section" aria-labelledby="playerTitle"><div class="section-title"><h3 id="playerTitle">播放器</h3></div><div class="settings-card">
       <label class="setting-row"><span>播放目标</span><select id="target"><option value="auto">自动识别当前视频</option><option value="browser">专用网页窗口 · 完整控制</option><option value="native">系统媒体 / 客户端 · 按接口能力</option></select></label>
       <div id="nativeSettings" hidden><label class="computer-field">媒体会话<select id="session"><option value="">自动识别哔哩哔哩客户端</option></select></label><button type="button" id="discover" class="secondary">检测浏览器 / 客户端</button><p class="section-note">先在普通 Edge / Chrome 播放视频，再检测并选择对应会话。系统接口通常支持暂停和进度；视频音量与倍速请使用专用网页窗口。</p></div>

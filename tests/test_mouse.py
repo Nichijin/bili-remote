@@ -1,6 +1,6 @@
 import ctypes
 import pytest
-from desktop.mouse import MouseController, WindowsMouse, absolute_point, INPUT, MOUSEINPUT
+from desktop.mouse import MouseController, WindowsMouse, PointerPosition, absolute_point, INPUT, MOUSEINPUT
 from desktop.protocol import validate
 
 
@@ -91,3 +91,25 @@ def test_click_injects_down_up_in_one_batch_and_attempts_release_on_partial_fail
 def test_protocol_does_not_inherit_media_selection_for_mouse():
     assert validate({"cmd": "mouse_start", "target": "native", "session_id": "a"}) == {"cmd": "mouse_start"}
     assert validate({"cmd": "mouse_move", "dx": -3, "dy": 4, "mouse_session": "a"*24})["dx"] == -3
+
+
+def test_delayed_os_cursor_observations_do_not_lose_accumulated_high_rate_deltas():
+    position=PointerPosition((100,100));bounds=(0,0,1920,1080)
+    assert position.advance((100,100),2,0,bounds)==(102,100)
+    assert position.advance((100,100),3,0,bounds)==(105,100)
+    assert position.advance((102,100),-1,0,bounds)==(104,100)
+    assert position.advance((105,100),-4,0,bounds)==(100,100)
+
+
+def test_unrelated_local_mouse_move_rebases_and_screen_edges_do_not_accumulate_overshoot():
+    position=PointerPosition((100,100));bounds=(-200,-100,400,200)
+    assert position.advance((80,40),2,3,bounds)==(82,43)
+    assert position.advance((82,43),1000,1000,bounds)==(199,99)
+    assert position.advance((199,99),-1,-1,bounds)==(198,98)
+
+
+def test_recent_output_history_expires_so_local_mouse_can_return_to_an_old_position():
+    now=[1.0];position=PointerPosition((100,100),clock=lambda:now[0]);bounds=(0,0,1920,1080)
+    assert position.advance((100,100),10,0,bounds)==(110,100)
+    now[0]+=.040
+    assert position.advance((100,100),1,0,bounds)==(101,100)

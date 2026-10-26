@@ -29,6 +29,7 @@ async def check(port,token):
         await ws.send(json.dumps({'id':1,'cmd':'mouse_start','stream':2}))
         result=json.loads(await ws.recv())
         assert result['ok'] and result['result']['mouse_stream']==2
+        assert result['result']['mouse_output_hz']==1000
         session=result['result']['mouse_session']
         for i in range(1,121):
             # Never replace zero coordinates with a real movement in this test.
@@ -65,8 +66,9 @@ def main():
             if process.poll() is None:
                 subprocess.run([str(args.exe),'--quit'],env=env,creationflags=subprocess.CREATE_NO_WINDOW,check=True,timeout=10)
                 process.wait(timeout=15)
-        report={'actual_exe':True,'stream_v2_negotiated':True,'ordered_acknowledgements':120,'mode_end_rejects_old_lease':True,'isolated_data_and_ports':True,'native_input_injected':False,'clean_exit':True}
-        (ROOT/'.tooling/packaged-mouse0512.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report))
+        from desktop.version import APP_VERSION
+        report={'version':APP_VERSION,'actual_exe':True,'stream_v2_negotiated':True,'default_output_hz':1000,'ordered_acknowledgements':120,'mode_end_rejects_old_lease':True,'isolated_data_and_ports':True,'native_input_injected':False,'clean_exit':True}
+        (ROOT/f'.tooling/packaged-mouse-{APP_VERSION}.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report))
 
 
 if __name__=='__main__': main()
